@@ -135,7 +135,6 @@ export function useVoiceRecording(options: UseVoiceRecordingOptions = {}): UseVo
             setState("idle");
             cleanup();
         }
-
     }, [cleanup, maxDuration, updateWaveform]);
 
     // 停止录制

@@ -3,15 +3,7 @@ import { Button, Input, InputNumber, Modal, Select, Switch } from "antd";
 import { AlertTriangle, Box, Check, FileImage, Link2, Plus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { nanoid } from "nanoid";
 
-import {
-    createStyleProfileSnapshot,
-    MAX_STYLE_ASSETS,
-    styleAssetValidationMessage,
-    type StyleAssetBinding,
-    type StyleAssetKind,
-    type StyleAssetStatus,
-    type StyleProfileSnapshot,
-} from "@/lib/canvas/style-profile";
+import { createStyleProfileSnapshot, MAX_STYLE_ASSETS, styleAssetValidationMessage, type StyleAssetBinding, type StyleAssetKind, type StyleAssetStatus, type StyleProfileSnapshot } from "@/lib/canvas/style-profile";
 
 const kindOptions: Array<{ value: StyleAssetKind; label: string }> = [
     { value: "lora", label: "LoRA" },
@@ -63,36 +55,35 @@ export function StyleAssetBindingModal({ open, profile, onClose, onApply }: Styl
     if (!draft) return null;
 
     const updateAsset = (patch: Partial<StyleAssetBinding>) => {
-        setDraft((current) => current ? { ...current, assets: current.assets.map((asset) => asset.id === editingId ? { ...asset, ...patch } : asset) } : current);
+        setDraft((current) => (current ? { ...current, assets: current.assets.map((asset) => (asset.id === editingId ? { ...asset, ...patch } : asset)) } : current));
     };
     const addAsset = () => {
         const asset = emptyAsset();
-        setDraft((current) => current ? { ...current, assets: [...current.assets, asset] } : current);
+        setDraft((current) => (current ? { ...current, assets: [...current.assets, asset] } : current));
         setEditingId(asset.id);
     };
     const deleteAsset = (id: string) => {
-        setDraft((current) => current ? { ...current, assets: current.assets.filter((asset) => asset.id !== id) } : current);
-        setEditingId((current) => current === id ? draft.assets.find((asset) => asset.id !== id)?.id || "" : current);
+        setDraft((current) => (current ? { ...current, assets: current.assets.filter((asset) => asset.id !== id) } : current));
+        setEditingId((current) => (current === id ? draft.assets.find((asset) => asset.id !== id)?.id || "" : current));
     };
 
     return (
-        <Modal
-            rootClassName="style-asset-binding-modal"
-            open={open}
-            title={null}
-            footer={null}
-            centered
-            width="min(980px, calc(100vw - 24px))"
-            onCancel={onClose}
-            styles={{ container: { padding: 0 }, body: { padding: 0 } }}
-        >
+        <Modal rootClassName="style-asset-binding-modal" open={open} title={null} footer={null} centered width="min(980px, calc(100vw - 24px))" onCancel={onClose} styles={{ container: { padding: 0 }, body: { padding: 0 } }}>
             <div className="flex max-h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
                 <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 pr-12 sm:items-center sm:px-5">
                     <div className="min-w-0">
                         <h2 className="text-sm font-semibold">风格执行资产</h2>
                         <p className="mt-0.5 text-[var(--fs-label)] text-foreground/45">绑定模型资产、兼容范围、执行参数和许可快照</p>
                     </div>
-                    <Button className="shrink-0" icon={<Plus className="size-3.5" />} disabled={draft.assets.length >= MAX_STYLE_ASSETS} title={draft.assets.length >= MAX_STYLE_ASSETS ? `最多绑定 ${MAX_STYLE_ASSETS} 个资产` : undefined} onClick={addAsset}>添加资产</Button>
+                    <Button
+                        className="shrink-0"
+                        icon={<Plus className="size-3.5" />}
+                        disabled={draft.assets.length >= MAX_STYLE_ASSETS}
+                        title={draft.assets.length >= MAX_STYLE_ASSETS ? `最多绑定 ${MAX_STYLE_ASSETS} 个资产` : undefined}
+                        onClick={addAsset}
+                    >
+                        添加资产
+                    </Button>
                 </header>
 
                 <div className="grid min-h-0 flex-1 md:grid-cols-3">
@@ -127,9 +118,11 @@ export function StyleAssetBindingModal({ open, profile, onClose, onApply }: Styl
                                             <AssetKindIcon kind={asset.kind} />
                                             <span className="min-w-0 flex-1">
                                                 <span className="block truncate text-xs font-medium">{asset.title || "未命名资产"}</span>
-                                                <span className="mt-1 block truncate text-[var(--fs-tiny)] text-foreground/42">{assetKindLabel(asset.kind)} · {assetStatusLabel(asset.status)}</span>
+                                                <span className="mt-1 block truncate text-[var(--fs-tiny)] text-foreground/42">
+                                                    {assetKindLabel(asset.kind)} · {assetStatusLabel(asset.status)}
+                                                </span>
                                             </span>
-                                            <span className={`mt-1 size-1.5 shrink-0 rounded-full ${issue ? "bg-red-500" : asset.enabled ? asset.status === "validated" ? "bg-emerald-500" : "bg-amber-500" : "bg-foreground/20"}`} />
+                                            <span className={`mt-1 size-1.5 shrink-0 rounded-full ${issue ? "bg-red-500" : asset.enabled ? (asset.status === "validated" ? "bg-emerald-500" : "bg-amber-500") : "bg-foreground/20"}`} />
                                         </button>
                                     );
                                 })}
@@ -144,7 +137,10 @@ export function StyleAssetBindingModal({ open, profile, onClose, onApply }: Styl
                             <AssetEditor asset={editing} onChange={updateAsset} onDelete={() => deleteAsset(editing.id)} />
                         ) : (
                             <div className="grid min-h-72 place-items-center text-center">
-                                <div><Plus className="mx-auto size-5 text-foreground/25" /><p className="mt-2 text-xs text-foreground/50">添加或选择一个执行资产</p></div>
+                                <div>
+                                    <Plus className="mx-auto size-5 text-foreground/25" />
+                                    <p className="mt-2 text-xs text-foreground/50">添加或选择一个执行资产</p>
+                                </div>
                             </div>
                         )}
                     </main>
@@ -157,12 +153,7 @@ export function StyleAssetBindingModal({ open, profile, onClose, onApply }: Styl
                     </div>
                     <div className="flex shrink-0 justify-end gap-2">
                         <Button onClick={onClose}>取消</Button>
-                        <Button
-                            type="primary"
-                            icon={<Save className="size-3.5" />}
-                            disabled={issues.length > 0}
-                            onClick={() => onApply(createStyleProfileSnapshot({ ...draft, source: "user", revision: draft.revision + 1 }))}
-                        >
+                        <Button type="primary" icon={<Save className="size-3.5" />} disabled={issues.length > 0} onClick={() => onApply(createStyleProfileSnapshot({ ...draft, source: "user", revision: draft.revision + 1 }))}>
                             应用配置
                         </Button>
                     </div>
@@ -181,7 +172,9 @@ function AssetEditor({ asset, onChange, onDelete }: { asset: StyleAssetBinding; 
                     <h3 className="text-sm font-semibold">资产配置</h3>
                     <p className="mt-1 text-[var(--fs-label)] text-foreground/45">已验证且启用的资产才会进入执行计划</p>
                 </div>
-                <Button danger type="text" icon={<Trash2 className="size-3.5" />} onClick={onDelete}>删除</Button>
+                <Button danger type="text" icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
+                    删除
+                </Button>
             </div>
 
             {validationMessage ? (
@@ -287,10 +280,18 @@ function GenerationParameterFields({ asset, onChange }: AssetFieldProps) {
         <section className="border-t border-border pt-4">
             <h4 className="mb-3 text-xs font-semibold">建议生成参数</h4>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Sampler"><Input value={parameters.sampler} placeholder="可选" onChange={(event) => updateParameters({ sampler: event.target.value })} /></Field>
-                <Field label="Steps"><InputNumber className="w-full" min={1} max={200} value={parameters.steps} onChange={(steps) => updateParameters({ steps: steps ?? undefined })} /></Field>
-                <Field label="CFG"><InputNumber className="w-full" min={0} max={50} step={0.5} value={parameters.cfg} onChange={(cfg) => updateParameters({ cfg: cfg ?? undefined })} /></Field>
-                <Field label="推荐尺寸"><Input value={parameters.size} placeholder="例如 1024x1536" onChange={(event) => updateParameters({ size: event.target.value })} /></Field>
+                <Field label="Sampler">
+                    <Input value={parameters.sampler} placeholder="可选" onChange={(event) => updateParameters({ sampler: event.target.value })} />
+                </Field>
+                <Field label="Steps">
+                    <InputNumber className="w-full" min={1} max={200} value={parameters.steps} onChange={(steps) => updateParameters({ steps: steps ?? undefined })} />
+                </Field>
+                <Field label="CFG">
+                    <InputNumber className="w-full" min={0} max={50} step={0.5} value={parameters.cfg} onChange={(cfg) => updateParameters({ cfg: cfg ?? undefined })} />
+                </Field>
+                <Field label="推荐尺寸">
+                    <Input value={parameters.size} placeholder="例如 1024x1536" onChange={(event) => updateParameters({ size: event.target.value })} />
+                </Field>
             </div>
         </section>
     );
@@ -304,12 +305,20 @@ function LicenseFields({ asset, onChange }: AssetFieldProps) {
                 <Field label="商业使用">
                     <Select
                         value={asset.license?.commercial === true ? "yes" : asset.license?.commercial === false ? "no" : "unknown"}
-                        options={[{ value: "unknown", label: "尚未确认" }, { value: "yes", label: "允许商用" }, { value: "no", label: "不可商用" }]}
+                        options={[
+                            { value: "unknown", label: "尚未确认" },
+                            { value: "yes", label: "允许商用" },
+                            { value: "no", label: "不可商用" },
+                        ]}
                         onChange={(value: "unknown" | "yes" | "no") => onChange({ license: { ...asset.license, commercial: value === "unknown" ? undefined : value === "yes" } })}
                     />
                 </Field>
-                <Field label="许可来源"><Input value={asset.license?.source} placeholder="许可页面或协议版本" onChange={(event) => onChange({ license: { ...asset.license, source: event.target.value } })} /></Field>
-                <Field label="许可说明" className="sm:col-span-2"><Input value={asset.license?.note} placeholder="记录会员限制、署名或转售限制" onChange={(event) => onChange({ license: { ...asset.license, note: event.target.value } })} /></Field>
+                <Field label="许可来源">
+                    <Input value={asset.license?.source} placeholder="许可页面或协议版本" onChange={(event) => onChange({ license: { ...asset.license, source: event.target.value } })} />
+                </Field>
+                <Field label="许可说明" className="sm:col-span-2">
+                    <Input value={asset.license?.note} placeholder="记录会员限制、署名或转售限制" onChange={(event) => onChange({ license: { ...asset.license, note: event.target.value } })} />
+                </Field>
             </div>
         </section>
     );
@@ -331,7 +340,11 @@ function AssetKindIcon({ kind }: { kind: StyleAssetKind }) {
 function EmptyAssetList() {
     return (
         <div className="grid min-h-52 place-items-center px-6 text-center">
-            <div><Box className="mx-auto size-5 text-foreground/25" /><p className="mt-2 text-xs font-medium">尚未绑定执行资产</p><p className="mt-1 text-[var(--fs-tiny)] leading-5 text-foreground/42">当前画风只通过项目 Prompt 执行</p></div>
+            <div>
+                <Box className="mx-auto size-5 text-foreground/25" />
+                <p className="mt-2 text-xs font-medium">尚未绑定执行资产</p>
+                <p className="mt-1 text-[var(--fs-tiny)] leading-5 text-foreground/42">当前画风只通过项目 Prompt 执行</p>
+            </div>
         </div>
     );
 }
@@ -345,5 +358,10 @@ function assetStatusLabel(status: StyleAssetStatus) {
 }
 
 function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) {
-    return <label className={`grid gap-1.5 text-xs ${className}`}><span className="font-medium text-foreground/60">{label}</span>{children}</label>;
+    return (
+        <label className={`grid gap-1.5 text-xs ${className}`}>
+            <span className="font-medium text-foreground/60">{label}</span>
+            {children}
+        </label>
+    );
 }

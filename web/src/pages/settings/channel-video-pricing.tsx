@@ -135,7 +135,9 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                             <ProtocolCardPicker
                                 capability={activeCapability}
                                 value={activeProtocol}
-                                onChange={(nextProtocol) => updateCost(activeModel, { protocol: nextProtocol, capabilityConfig: activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined })}
+                                onChange={(nextProtocol) =>
+                                    updateCost(activeModel, { protocol: nextProtocol, capabilityConfig: activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined })
+                                }
                             />
                         </section>
                         {activeCapability === "video" ? (
@@ -168,7 +170,13 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                             </div>
                         ) : null}
                         {activeCapability === "image" || activeCapability === "video" ? (
-                            <ModelCapabilityEditor capability={activeCapability} model={activeModel} value={activeModelCost?.capabilityConfig || defaultModelCapabilityConfig(activeProtocol, activeModel)} protocol={activeProtocol} onChange={(capabilityConfig) => updateCost(activeModel, { capabilityConfig })} />
+                            <ModelCapabilityEditor
+                                capability={activeCapability}
+                                model={activeModel}
+                                value={activeModelCost?.capabilityConfig || defaultModelCapabilityConfig(activeProtocol, activeModel)}
+                                protocol={activeProtocol}
+                                onChange={(capabilityConfig) => updateCost(activeModel, { capabilityConfig })}
+                            />
                         ) : null}
                     </div>
                 ) : null}

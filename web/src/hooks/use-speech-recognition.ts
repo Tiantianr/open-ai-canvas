@@ -152,7 +152,9 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}):
             recognition.onend = null;
             try {
                 recognition.abort();
-            } catch { /* ignore */ }
+            } catch {
+                /* ignore */
+            }
         }
         finalTextRef.current = "";
     }, []);

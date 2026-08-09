@@ -34,7 +34,6 @@ export default function TestVoiceRecording() {
         }
     };
 
-
     return (
         <div className="min-h-screen p-8" style={{ background: theme.spatial.surface }}>
             <div className="mx-auto max-w-2xl">
@@ -74,14 +73,7 @@ export default function TestVoiceRecording() {
                             <div className="flex flex-1 items-center gap-2">
                                 <VoiceRecordingButton onTranscribed={handleTranscribed} />
                             </div>
-                            <Button
-                                type="primary"
-                                icon={<Send className="size-4" />}
-                                disabled={!prompt.trim()}
-                                loading={sending}
-                                onClick={handleSubmit}
-                                style={{ background: theme.accent.primary, borderColor: theme.accent.primary }}
-                            >
+                            <Button type="primary" icon={<Send className="size-4" />} disabled={!prompt.trim()} loading={sending} onClick={handleSubmit} style={{ background: theme.accent.primary, borderColor: theme.accent.primary }}>
                                 发送
                             </Button>
                         </div>

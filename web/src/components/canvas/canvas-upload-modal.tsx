@@ -25,7 +25,7 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
     }, [open]);
 
     const submit = async () => {
-        const files = fileList.flatMap((item) => item.originFileObj ? [item.originFileObj] : []);
+        const files = fileList.flatMap((item) => (item.originFileObj ? [item.originFileObj] : []));
         if (!files.length) return;
         setUploading(true);
         try {
@@ -53,7 +53,9 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
             <div className="flex min-h-96 flex-col overflow-hidden">
                 <header className="flex h-14 shrink-0 items-center justify-between border-b border-border py-0 pl-5 pr-12">
                     <div className="min-w-0">
-                        <div role="heading" aria-level={2} className="text-sm font-semibold leading-5">上传文件</div>
+                        <div role="heading" aria-level={2} className="text-sm font-semibold leading-5">
+                            上传文件
+                        </div>
                         <div className="mt-0.5 text-[var(--fs-label)] leading-4 text-foreground/45">批量导入图片、视频和音频到当前画布</div>
                     </div>
                     <span className="shrink-0 text-[var(--fs-label)] text-foreground/45">已选 {fileList.length} 项</span>
@@ -84,9 +86,18 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
                             <p className="mt-4 text-sm font-medium">拖动文件到这里，或点击选择</p>
                             <p className="mt-1 text-xs text-foreground/45">支持同时选择多个文件</p>
                             <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[var(--fs-label)] text-foreground/45" aria-label="支持的文件类型">
-                                <span className="inline-flex items-center gap-1"><FileImage className="size-3.5" aria-hidden="true" />图片</span>
-                                <span className="inline-flex items-center gap-1"><Film className="size-3.5" aria-hidden="true" />视频</span>
-                                <span className="inline-flex items-center gap-1"><Music2 className="size-3.5" aria-hidden="true" />MP3 / WAV</span>
+                                <span className="inline-flex items-center gap-1">
+                                    <FileImage className="size-3.5" aria-hidden="true" />
+                                    图片
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                    <Film className="size-3.5" aria-hidden="true" />
+                                    视频
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                    <Music2 className="size-3.5" aria-hidden="true" />
+                                    MP3 / WAV
+                                </span>
                             </div>
                         </div>
                     </Upload.Dragger>
@@ -108,7 +119,9 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
                                             <X className="size-3.5" aria-hidden="true" />
                                         </button>
                                     </div>
-                                    <div className="truncate px-2 py-1.5 text-[var(--fs-micro)] text-foreground/70" title={file.name}>{file.name}</div>
+                                    <div className="truncate px-2 py-1.5 text-[var(--fs-micro)] text-foreground/70" title={file.name}>
+                                        {file.name}
+                                    </div>
                                 </article>
                             ))}
                         </div>
@@ -118,7 +131,9 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
                 <footer className="flex h-14 shrink-0 items-center justify-between border-t border-border px-4">
                     <span className="hidden text-[var(--fs-label)] text-foreground/45 sm:inline">文件将在确认后按顺序添加到画布</span>
                     <div className="ml-auto flex gap-2">
-                        <Button disabled={uploading} onClick={onClose}>取消</Button>
+                        <Button disabled={uploading} onClick={onClose}>
+                            取消
+                        </Button>
                         <Button type="primary" icon={<UploadCloud className="size-4" />} disabled={!fileList.length} loading={uploading} onClick={() => void submit()}>
                             添加到画布{fileList.length ? `（${fileList.length}）` : ""}
                         </Button>
@@ -146,11 +161,7 @@ function CanvasUploadFilePreview({ file }: { file: UploadFile }) {
     if (source?.type.startsWith("video/") && previewUrl) {
         return <video src={previewUrl} aria-label={`预览：${file.name}`} muted playsInline preload="metadata" className="size-full object-cover" />;
     }
-    return (
-        <div className="grid size-full place-items-center text-foreground/45">
-            {source && isAudioFile(source) ? <Music2 className="size-7" aria-hidden="true" /> : <FileImage className="size-7" aria-hidden="true" />}
-        </div>
-    );
+    return <div className="grid size-full place-items-center text-foreground/45">{source && isAudioFile(source) ? <Music2 className="size-7" aria-hidden="true" /> : <FileImage className="size-7" aria-hidden="true" />}</div>;
 }
 
 function isCanvasUploadFile(file: File) {
