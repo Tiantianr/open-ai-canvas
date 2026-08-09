@@ -103,8 +103,8 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	if err != nil {
 		return nil, err
 	}
-	if config.InterfaceType != string(model.ChannelInterfaceNewAPIChannel2) {
-		return nil, BadAuthRequest("该任务不使用 NewAPI Video Generations 协议")
+	if config.InterfaceType != string(model.ChannelInterfaceNewAPIChannel2) && config.InterfaceType != string(model.ChannelInterfaceAsyncVideoGenerations) && config.InterfaceType != string(model.ChannelInterfaceMiniMaxH3) && config.InterfaceType != string(model.ChannelInterfaceComfyUIH3) {
+		return nil, BadAuthRequest("该任务不使用可恢复的异步视频协议")
 	}
 	input.Config = config
 	task.InputJSON = decryptedInput
@@ -124,8 +124,37 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	defer func() { _ = s.repo.ReleaseTaskProviderRecovery(task.ID, owner) }()
 
 	queryCtx := withProviderAnalytics(ctx, s, *task)
-	result, providerStatus, err := queryNewAPIChannel2VideoTask(queryCtx, input, providerRequestID)
+	var result map[string]interface{}
+	var providerStatus string
+	switch config.InterfaceType {
+	case string(model.ChannelInterfaceNewAPIChannel2):
+		result, providerStatus, err = queryNewAPIChannel2VideoTask(queryCtx, input, providerRequestID)
+	case string(model.ChannelInterfaceAsyncVideoGenerations):
+		result, providerStatus, err = queryAsyncVideoGenerationsTask(queryCtx, input, providerRequestID)
+	case string(model.ChannelInterfaceMiniMaxH3):
+		result, providerStatus, err = queryMiniMaxH3Task(queryCtx, input, providerRequestID)
+	case string(model.ChannelInterfaceComfyUIH3):
+		var pending bool
+		result, pending, err = queryComfyUIH3Task(queryCtx, input, providerRequestID)
+		if pending {
+			providerStatus = "running"
+		} else if err == nil {
+			providerStatus = "completed"
+		} else {
+			providerStatus = "failed"
+		}
+	}
 	if err != nil {
+		var terminalFailure *asyncVideoGenerationsTaskFailure
+		var comfyFailure *comfyUIH3TaskFailure
+		if errors.As(err, &terminalFailure) || errors.As(err, &comfyFailure) {
+			if refundErr := s.RefundBilling(task.BillingOrderID, err.Error()); refundErr != nil {
+				_ = s.log(task.UserID, task.ID, "error", "人工查询确认上游视频失败，但积分退款失败", refundErr.Error())
+				return nil, refundErr
+			}
+			_ = s.log(task.UserID, task.ID, "info", "人工查询确认上游视频失败，预留积分已退回", providerStatus)
+			return &ProviderTaskQueryResult{Task: taskForOutput(*task), ProviderStatus: providerStatus, Recovered: false, BillingSettled: true}, nil
+		}
 		_ = s.log(task.UserID, task.ID, "error", "人工查询上游视频任务失败", err.Error())
 		return nil, err
 	}

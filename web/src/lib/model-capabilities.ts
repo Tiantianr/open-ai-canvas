@@ -58,6 +58,50 @@ export function defaultModelCapabilityConfig(protocol?: ModelProtocol): ModelCap
         operations: ["text_to_video", "image_to_video"],
         defaultOperation: "text_to_video",
     };
+    if (protocol === "async-video-generations") {
+        video.references.promptMaxChars = 1_000_000;
+        video.references.maxImages = 12;
+        video.references.maxImageBytes = 10 * 1024 * 1024;
+    }
+    if (protocol === "minimax-h3") {
+        video.references = {
+            promptMaxChars: 7000,
+            maxImages: 9,
+            maxImageBytes: 30 * 1024 * 1024,
+            maxVideos: 3,
+            maxVideoBytes: 50 * 1024 * 1024,
+            maxVideoDurationSeconds: 0,
+            maxAudios: 3,
+            maxAudioBytes: 15 * 1024 * 1024,
+            maxAudioDurationSeconds: 0,
+        };
+        video.duration = { selection: "range", min: 4, max: 15, step: 1, default: 5 };
+        video.ratios = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+        video.defaultRatio = "adaptive";
+        video.resolutions = ["768p", "2k"];
+        video.defaultResolution = "768p";
+    }
+    if (protocol === "comfyui-h3") {
+        video.references = {
+            promptMaxChars: 7000,
+            maxImages: 9,
+            maxImageBytes: 30 * 1024 * 1024,
+            maxVideos: 0,
+            maxVideoBytes: 0,
+            maxVideoDurationSeconds: 0,
+            maxAudios: 0,
+            maxAudioBytes: 0,
+            maxAudioDurationSeconds: 0,
+        };
+        video.duration = { selection: "range", min: 5, max: 15, step: 1, default: 5 };
+        video.ratios = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+        video.defaultRatio = "16:9";
+        video.resolutions = ["768p", "2k"];
+        video.defaultResolution = "768p";
+        video.generateAudio = { supported: true, default: true };
+        video.operations = ["image_to_video"];
+        video.defaultOperation = "image_to_video";
+    }
     if (protocol === "volcengine-jimeng-video") video.duration = { selection: "enum", values: [5, 10], default: 5 };
     if (protocol === "gemini-veo") {
         video.duration = { selection: "enum", values: [4, 6, 8], default: 6 };
@@ -76,13 +120,13 @@ export function defaultModelCapabilityConfig(protocol?: ModelProtocol): ModelCap
     return { version: 1, video };
 }
 
-export function modelCapabilityConfigFor(config: { channels: Array<{ id: string; models: string[]; modelCosts?: Array<{ model: string; capabilityConfig?: ModelCapabilityConfig; protocol?: ModelProtocol }> }> }, model: string) {
+export function modelCapabilityConfigFor(config: { channels: Array<{ id: string; models: string[]; interfaceType?: ModelProtocol; modelCosts?: Array<{ model: string; capabilityConfig?: ModelCapabilityConfig; protocol?: ModelProtocol }> }> }, model: string) {
     const separator = model.indexOf("::");
     const channelId = separator >= 0 ? model.slice(0, separator) : "";
     const modelName = separator >= 0 ? model.slice(separator + 2) : model;
     const channel = config.channels.find((item) => item.id === channelId) || config.channels.find((item) => item.models.includes(modelName));
     const cost = channel?.modelCosts?.find((item) => item.model === modelName);
-    return cost?.capabilityConfig || defaultModelCapabilityConfig(cost?.protocol);
+    return cost?.capabilityConfig || defaultModelCapabilityConfig(cost?.protocol || channel?.interfaceType);
 }
 
 export function normalizeVideoValue(profile: VideoCapabilityConfig, value: { seconds?: string; ratio?: string; resolution?: string }) {

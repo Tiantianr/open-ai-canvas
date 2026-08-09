@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/base64"
 	"net"
 	"net/http"
@@ -84,6 +85,19 @@ func TestValidateOutboundURLAllowsExplicitPrivateUpstreamOverride(t *testing.T) 
 	}
 }
 
+func TestResolveOutboundHostMapsLoopbackToConfiguredGateway(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "")
+	t.Setenv("CANVAS_LOOPBACK_UPSTREAM_HOST", "127.0.0.2")
+	addresses, err := resolveOutboundHost(context.Background(), "127.0.0.1")
+	if err != nil {
+		t.Fatalf("resolveOutboundHost() error = %v", err)
+	}
+	if len(addresses) != 1 || !addresses[0].Equal(net.ParseIP("127.0.0.2")) {
+		t.Fatalf("resolveOutboundHost() = %v, want [127.0.0.2]", addresses)
+	}
+}
+
 func TestValidateOutboundURLAllowsOnlyNamedPrivateUpstream(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
@@ -111,8 +125,12 @@ func TestValidateCustomRelayURLAllowsHTTPOnlyForExactPrivateAllowlist(t *testing
 	if _, err := ValidateCustomRelayURL("http://127.0.0.1:8080/v1/models"); err == nil {
 		t.Fatal("ValidateCustomRelayURL() should reject HTTP without an exact host allowlist")
 	}
+	if _, err := ValidateCustomRelayURL("https://127.0.0.1:8080/v1/models"); err != nil {
+		t.Fatalf("ValidateCustomRelayURL() should honor the explicit global private upstream override: %v", err)
+	}
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	if _, err := ValidateCustomRelayURL("https://127.0.0.1:8080/v1/models"); err == nil {
-		t.Fatal("ValidateCustomRelayURL() should ignore the global private upstream override")
+		t.Fatal("ValidateCustomRelayURL() should reject an unlisted private host")
 	}
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 	for _, rawURL := range []string{

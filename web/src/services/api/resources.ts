@@ -61,10 +61,21 @@ export function resourceIdFromStorageKey(storageKey?: string) {
     return storageKey?.startsWith("resource:") ? storageKey.slice("resource:".length) : "";
 }
 
-export function isResourceUrl(url?: string) {
+export function resourceIdFromUrl(url?: string) {
     const base = String(apiBaseURL).replace(/\/+$/, "");
     const path = url?.split(/[?#]/, 1)[0] || "";
-    return path.startsWith(`${base}/resources/`) && path.endsWith("/file");
+    const prefix = `${base}/resources/`;
+    if (!path.startsWith(prefix) || !path.endsWith("/file")) return "";
+    try {
+        const id = decodeURIComponent(path.slice(prefix.length, -"/file".length));
+        return id && !id.includes("/") ? id : "";
+    } catch {
+        return "";
+    }
+}
+
+export function isResourceUrl(url?: string) {
+    return Boolean(resourceIdFromUrl(url));
 }
 
 export async function uploadResourceFile(file: Blob, kind: "image" | "video" | "audio" | "file", meta?: { width?: number; height?: number; durationMs?: number; fileName?: string }) {

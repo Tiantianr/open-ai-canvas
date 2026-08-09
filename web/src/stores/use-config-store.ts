@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
+import { normalizeAgentReasoningEffort, type AgentReasoningEffort } from "@/lib/agent-reasoning";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { modelProtocolCapability, normalizeModelProtocol, type ModelProtocol } from "@/lib/model-protocols";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
@@ -51,6 +52,7 @@ export type AiConfig = {
     imageModel: string;
     videoModel: string;
     textModel: string;
+    agentReasoningEffort: AgentReasoningEffort;
     audioModel: string;
     audioVoice: string;
     audioFormat: string;
@@ -98,6 +100,7 @@ export const defaultConfig: AiConfig = {
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
     textModel: "default::gpt-5.5",
+    agentReasoningEffort: "auto",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
     audioFormat: "mp3",
@@ -235,7 +238,8 @@ export function configuredModelMatchesCapability(config: AiConfig, model: string
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    const protocol = channel.modelCosts?.find((item) => item.model === modelOptionName(model))?.protocol || channel.interfaceType;
+    return Boolean(model.trim() && channel.baseUrl.trim() && (protocol === "comfyui-h3" || channel.apiKey.trim()));
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -305,6 +309,7 @@ export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefine
             imageModel: normalizeSelectedModel(config.imageModel || model, channels, imageModels),
             videoModel: normalizeSelectedModel(config.videoModel || "grok-imagine-video", channels, videoModels),
             textModel: normalizeSelectedModel(config.textModel || model, channels, textModels),
+            agentReasoningEffort: normalizeAgentReasoningEffort(config.agentReasoningEffort),
             audioModel: normalizeSelectedModel(config.audioModel || defaultConfig.audioModel, channels, audioModels),
             audioVoice: config.audioVoice || defaultConfig.audioVoice,
             audioFormat: config.audioFormat || defaultConfig.audioFormat,
@@ -491,7 +496,7 @@ export function defaultBaseUrlForChannelInterface(interfaceType?: ChannelInterfa
     if (interfaceType === "gemini-veo") return GEMINI_BASE_URL;
     if (interfaceType === "volcengine-ark-image" || interfaceType === "volcengine-ark-video") return "https://ark.cn-beijing.volces.com/api/v3";
     if (interfaceType === "volcengine-jimeng-image" || interfaceType === "volcengine-jimeng-video") return "https://visual.volcengineapi.com";
-    if (interfaceType === "newapi" || interfaceType === "newapi-channel-1" || interfaceType === "newapi-channel-2" || interfaceType === "xai-video") return "";
+    if (interfaceType === "newapi" || interfaceType === "newapi-channel-1" || interfaceType === "newapi-channel-2" || interfaceType === "async-video-generations" || interfaceType === "minimax-h3" || interfaceType === "comfyui-h3" || interfaceType === "xai-video") return "";
     return OPENAI_BASE_URL;
 }
 

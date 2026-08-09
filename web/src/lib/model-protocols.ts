@@ -9,6 +9,9 @@ export type ModelProtocol =
     | "newapi"
     | "newapi-channel-1"
     | "newapi-channel-2"
+    | "async-video-generations"
+    | "minimax-h3"
+    | "comfyui-h3"
     | "xai-video"
     | "volcengine-ark-video"
     | "volcengine-jimeng-video"
@@ -45,6 +48,9 @@ export const MODEL_PROTOCOLS: ModelProtocolDefinition[] = [
         contentType: "application/json",
         media: "image_urls（首帧、尾帧、其他参考图） / video_urls / audio_urls",
     },
+    { value: "async-video-generations", label: "异步 Video Generations", capability: "video", create: "POST /v1/videos/generations", poll: "GET /v1/videos/generations/{task_id}", contentType: "application/json", media: "文本或最多 12 张参考图（images，第 1 张为首图）" },
+    { value: "minimax-h3", label: "MiniMax H3", capability: "video", create: "POST /v2/video_generation", poll: "GET /v2/query/video_generation/{task_id}", contentType: "application/json", media: "首/尾帧或最多 9 图、3 视频、3 音频的参考模式，二者不可混用" },
+    { value: "comfyui-h3", label: "ComfyUI H3（本地）", capability: "video", create: "POST /upload/image + /prompt", poll: "GET /history/{prompt_id}", contentType: "multipart/form-data + application/json", media: "本地静态图片 Ref2VA：1-9 张参考图，不上传视频或音频参考" },
     { value: "xai-video", label: "xAI 官方视频", capability: "video", create: "POST /v1/videos/generations", poll: "GET /v1/videos/{request_id}", contentType: "application/json", media: "单张起始图" },
     {
         value: "volcengine-ark-video",

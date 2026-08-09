@@ -444,6 +444,9 @@ func (s *Service) taskBillingOrder(userID string, task *model.Task, input map[st
 		return nil, nil
 	}
 	modelKey := strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(config["model"])), "models/")
+	if item, lookupErr := s.repo.ChannelModelByKey(channelID, modelKey); lookupErr == nil && item.Protocol == model.ChannelInterfaceComfyUIH3 {
+		return nil, nil
+	}
 	capability := normalizeCapability(fmt.Sprint(input["mode"]))
 	if capability == "" {
 		capability = capabilityFromTaskType(task.Type)
@@ -653,6 +656,9 @@ func (s *Service) BillingFailureRequiresReview(orderID string, taskID string, er
 	if orderID == "" {
 		return false
 	}
+	if providerConfirmedNoChargeFailure(err) {
+		return false
+	}
 	if billingFailureUncertain(err) {
 		return true
 	}
@@ -662,6 +668,14 @@ func (s *Service) BillingFailureRequiresReview(orderID string, taskID string, er
 	}
 	hasSuccessfulCall, logErr := s.repo.TaskHasSuccessfulBillableCall(taskID)
 	return logErr != nil || hasSuccessfulCall
+}
+
+// 只有适配器识别到供应商的明确失败且协议承诺不计费时才允许自动退款。
+// 连接中断、超时和未知终态都不能通过文本猜测为未计费。
+func providerConfirmedNoChargeFailure(err error) bool {
+	var asyncFailure *asyncVideoGenerationsTaskFailure
+	var comfyFailure *comfyUIH3TaskFailure
+	return errors.As(err, &asyncFailure) || errors.As(err, &comfyFailure)
 }
 
 func billingFailureUncertain(err error) bool {

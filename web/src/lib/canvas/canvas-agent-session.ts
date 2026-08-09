@@ -1,16 +1,9 @@
-import {
-    agentSessionFailureMessage,
-    createAgentSession,
-    queryAgentSession,
-    type AgentSessionDetail,
-    type CreateSessionInput,
-} from "@/services/api/task-center";
-
-const CINEMATIC_SESSION_POLL_INTERVAL_MS = 2000;
-const CINEMATIC_SESSION_MAX_POLLS = 120;
+import { agentSessionFailureMessage, createAgentSession, queryAgentSession, type AgentSessionDetail, type CreateSessionInput } from "@/services/api/task-center";
+import { cinematicSessionPollIntervalMs, isCinematicSessionLongRunning } from "@/lib/canvas/cinematic-session-polling";
 
 type CinematicSessionWaitOptions = {
     signal?: AbortSignal;
+    onLongRunning?: (detail: AgentSessionDetail) => void;
 };
 
 type CreateCinematicSessionOptions = CinematicSessionWaitOptions & {
@@ -42,14 +35,23 @@ export function isAgentSessionPollingAbort(error: unknown) {
 
 async function waitForCinematicAgentSession(initialDetail: AgentSessionDetail, options: CinematicSessionWaitOptions) {
     let detail = initialDetail;
-    for (let attempt = 0; attempt < CINEMATIC_SESSION_MAX_POLLS; attempt += 1) {
+    const waitStartedAt = Date.now();
+    const createdAt = Date.parse(initialDetail.session.createdAt);
+    const sessionStartedAt = Number.isFinite(createdAt) ? Math.min(createdAt, waitStartedAt) : waitStartedAt;
+    let longRunningNotified = false;
+    // 后端任务超时和租约恢复负责收敛终态；前端不能按固定轮询次数误判仍在运行的会话。
+    while (true) {
         throwIfAborted(options.signal);
         if (detail.session.status === "completed") return detail;
         if (detail.session.status === "failed") throw new Error(agentSessionFailureMessage(detail));
-        await abortableDelay(CINEMATIC_SESSION_POLL_INTERVAL_MS, options.signal);
+        const elapsedMs = Math.max(0, Date.now() - sessionStartedAt);
+        if (!longRunningNotified && isCinematicSessionLongRunning(elapsedMs)) {
+            longRunningNotified = true;
+            options.onLongRunning?.(detail);
+        }
+        await abortableDelay(cinematicSessionPollIntervalMs(elapsedMs), options.signal);
         detail = await queryAgentSession(initialDetail.session.id);
     }
-    throw new Error("后端影视 Agent 会话超时");
 }
 
 function abortableDelay(ms: number, signal?: AbortSignal) {

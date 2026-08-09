@@ -7,6 +7,7 @@ import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
+import { currentSeedanceAssetId } from "@/lib/seedance-provider-assets";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -123,12 +124,14 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
 
 export function nodeReferenceImage(node: CanvasNodeData): ReferenceImage | null {
     if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    const seedanceAssetId = currentSeedanceAssetId(node.metadata);
     return {
         id: node.id,
         name: `reference-${node.id}.png`,
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        seedanceAssetId: seedanceAssetId || undefined,
     };
 }
 

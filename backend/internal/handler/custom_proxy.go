@@ -55,11 +55,12 @@ func proxyCustomRelayRequest(c *gin.Context, policy service.RuntimeRequestPolicy
 	if apiFormat == "" {
 		apiFormat = "openai"
 	}
-	if err := authorizeCustomRelay(c.Request.Method, target, apiFormat, c.GetHeader("Content-Type")); err != nil {
+	protocol := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Canvas-Upstream-Protocol")))
+	if err := authorizeCustomRelayProtocol(c.Request.Method, target, apiFormat, c.GetHeader("Content-Type"), protocol); err != nil {
 		fail(c, http.StatusForbidden, err)
 		return
 	}
-	apiKey, err := customRelayAPIKey(c.GetHeader("Authorization"))
+	apiKey, err := customRelayAPIKey(c.GetHeader("Authorization"), protocol == "comfyui-h3")
 	if err != nil {
 		fail(c, http.StatusUnauthorized, err)
 		return
@@ -106,7 +107,7 @@ func proxyCustomRelayRequest(c *gin.Context, policy service.RuntimeRequestPolicy
 	service.ApplyDefaultOutboundHeaders(upstreamReq)
 	if apiFormat == "gemini" {
 		upstreamReq.Header.Set("x-goog-api-key", apiKey)
-	} else {
+	} else if apiKey != "" {
 		upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
@@ -214,7 +215,10 @@ func readLimitedRelayBody(body io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-func customRelayAPIKey(value string) (string, error) {
+func customRelayAPIKey(value string, allowEmpty bool) (string, error) {
+	if allowEmpty && (strings.TrimSpace(value) == "" || strings.EqualFold(strings.TrimSpace(value), "Bearer")) {
+		return "", nil
+	}
 	scheme, apiKey, found := strings.Cut(strings.TrimSpace(value), " ")
 	apiKey = strings.TrimSpace(apiKey)
 	if !found || !strings.EqualFold(scheme, "Bearer") || apiKey == "" || len(apiKey) > 512 || strings.ContainsAny(apiKey, "\r\n") {

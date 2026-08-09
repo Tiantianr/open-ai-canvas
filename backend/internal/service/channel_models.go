@@ -239,12 +239,41 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 			return nil, err
 		}
 	}
-	if strings.TrimSpace(channel.BaseURL) == "" || strings.TrimSpace(channel.APIKey) == "" {
+	if strings.TrimSpace(channel.BaseURL) == "" || (protocol != model.ChannelInterfaceComfyUIH3 && strings.TrimSpace(channel.APIKey) == "") {
 		return nil, BadAuthRequest("请先在渠道中配置 Base URL 和 API Key")
 	}
 	headers, err := ParseOutboundHeadersJSON(channel.HeadersJSON)
 	if err != nil {
 		return nil, err
+	}
+	if capability == "video" && (protocol == model.ChannelInterfaceAsyncVideoGenerations || protocol == model.ChannelInterfaceMiniMaxH3 || protocol == model.ChannelInterfaceComfyUIH3) {
+		// 异步视频协议的 POST 会创建任务；连接测试只读取不会触发生成的上游接口。
+		startedAt := time.Now()
+		modelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if protocol == model.ChannelInterfaceMiniMaxH3 {
+			var payload map[string]interface{}
+			config := providerConfig{BaseURL: channel.BaseURL, APIKey: channel.APIKey, Headers: headers}
+			if err := miniMaxH3JSON(modelCtx, config, http.MethodGet, "/query/video_generation?page_num=1&page_size=1", nil, &payload); err != nil {
+				return nil, err
+			}
+			return &AdminChannelModelTestResult{DurationMs: time.Since(startedAt).Milliseconds()}, nil
+		}
+		if protocol == model.ChannelInterfaceComfyUIH3 {
+			config := providerConfig{BaseURL: channel.BaseURL, APIKey: channel.APIKey, Headers: headers}
+			if err := testComfyUIH3Connection(modelCtx, config); err != nil {
+				return nil, err
+			}
+			return &AdminChannelModelTestResult{DurationMs: time.Since(startedAt).Milliseconds()}, nil
+		}
+		models, err := s.FetchChannelModels(modelCtx, actor, ChannelModelsRequest{BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: headers})
+		if err != nil {
+			return nil, err
+		}
+		if !stringInSlice(modelKey, models) {
+			return nil, BadAuthRequest("上游模型目录不包含 " + modelKey)
+		}
+		return &AdminChannelModelTestResult{DurationMs: time.Since(startedAt).Milliseconds()}, nil
 	}
 
 	prompt := map[string]string{
@@ -329,8 +358,17 @@ func normalizeChannelModelContract(channel *model.ModelChannel, req ChannelModel
 	if expected := capabilityForProtocol(protocol); expected != "" && expected != capability {
 		return "", "", "", BadAuthRequest("模型能力与请求协议不匹配")
 	}
+	if protocol != model.ChannelInterfaceComfyUIH3 && strings.TrimSpace(channel.APIKey) == "" {
+		return "", "", "", BadAuthRequest("该请求协议需要先在渠道中配置 API Key")
+	}
 	if (protocol == model.ChannelInterfaceVolcengineJiMengImage || protocol == model.ChannelInterfaceVolcengineJiMengVideo) && (strings.TrimSpace(channel.APIKey) == "" || strings.TrimSpace(channel.SecretKey) == "") {
 		return "", "", "", BadAuthRequest("即梦官方协议需要先在渠道中配置 Access Key 和 Secret Key")
+	}
+	if protocol == model.ChannelInterfaceMiniMaxH3 && !strings.EqualFold(modelKey, "MiniMax-H3") {
+		return "", "", "", BadAuthRequest("MiniMax H3 协议当前仅支持模型 MiniMax-H3")
+	}
+	if protocol == model.ChannelInterfaceComfyUIH3 && !isComfyUIH3Model(modelKey) {
+		return "", "", "", BadAuthRequest("ComfyUI H3 协议当前仅支持模型 MiniMax-H3-R2V")
 	}
 	return modelKey, capability, protocol, nil
 }
@@ -451,7 +489,7 @@ func capabilityForProtocol(protocol model.ChannelInterfaceType) string {
 		return "image"
 	case model.ChannelInterfaceOpenAIAudio, model.ChannelInterfaceAsyncAudio:
 		return "audio"
-	case model.ChannelInterfaceNewAPIVideo, model.ChannelInterfaceNewAPIChannel1, model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineArkVideo, model.ChannelInterfaceVolcengineJiMengVideo, model.ChannelInterfaceGeminiVeo:
+	case model.ChannelInterfaceNewAPIVideo, model.ChannelInterfaceNewAPIChannel1, model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceAsyncVideoGenerations, model.ChannelInterfaceMiniMaxH3, model.ChannelInterfaceComfyUIH3, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineArkVideo, model.ChannelInterfaceVolcengineJiMengVideo, model.ChannelInterfaceGeminiVeo:
 		return "video"
 	case model.ChannelInterfaceChatCompletion, model.ChannelInterfaceOpenAIResponse:
 		return "text"

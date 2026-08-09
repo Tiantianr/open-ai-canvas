@@ -285,7 +285,7 @@ func resolveOutboundHost(ctx context.Context, host string) ([]net.IP, error) {
 
 func resolveCustomRelayHost(ctx context.Context, host string) ([]net.IP, error) {
 	host = normalizeOutboundHost(host)
-	allowPrivateHost := allowedPrivateUpstreamHost(host)
+	allowPrivateHost := allowPrivateUpstreams() || allowedPrivateUpstreamHost(host)
 	addresses, err := resolveOutboundHostWithPolicy(ctx, host, allowPrivateHost)
 	if err != nil {
 		return nil, err
@@ -314,14 +314,44 @@ func resolveOutboundHostWithPolicy(ctx context.Context, host string, allowPrivat
 	if len(addresses) == 0 {
 		return nil, BadAuthRequest("外部服务域名没有可用地址")
 	}
-	if !allowPrivateHost {
-		for _, ip := range addresses {
-			if blockedOutboundIP(ip) {
-				return nil, BadAuthRequest("不允许访问本机、内网或链路本地地址")
-			}
+	if allowPrivateHost {
+		return mapLoopbackUpstream(ctx, addresses)
+	}
+	for _, ip := range addresses {
+		if blockedOutboundIP(ip) {
+			return nil, BadAuthRequest("不允许访问本机、内网或链路本地地址")
 		}
 	}
 	return addresses, nil
+}
+
+// Docker 中的回环地址属于容器本身。本地部署显式配置网关后，将只解析到
+// 回环地址的上游转到宿主机，同时保留原始 URL 和 Host 请求头。
+func mapLoopbackUpstream(ctx context.Context, addresses []net.IP) ([]net.IP, error) {
+	gatewayHost := normalizeOutboundHost(os.Getenv("CANVAS_LOOPBACK_UPSTREAM_HOST"))
+	if gatewayHost == "" || !allLoopbackAddresses(addresses) {
+		return addresses, nil
+	}
+	mapped, err := net.DefaultResolver.LookupIP(ctx, "ip", gatewayHost)
+	if err != nil {
+		return nil, BadAuthRequest("本机服务网关解析失败")
+	}
+	if len(mapped) == 0 {
+		return nil, BadAuthRequest("本机服务网关没有可用地址")
+	}
+	return mapped, nil
+}
+
+func allLoopbackAddresses(addresses []net.IP) bool {
+	if len(addresses) == 0 {
+		return false
+	}
+	for _, ip := range addresses {
+		if ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 func blockedOutboundIP(ip net.IP) bool {

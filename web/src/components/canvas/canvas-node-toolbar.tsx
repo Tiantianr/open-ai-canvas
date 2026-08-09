@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { App, Button, Dropdown, Input, Modal, Segmented, Tag } from "antd";
-import { Ellipsis, Lock, Plus, Settings2, Unlock } from "lucide-react";
+import { Ellipsis, Link2, Lock, Plus, Settings2, Unlink, Unlock } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import { defaultToolbarPrefs, readToolbarPrefs, resolveToolbarTools, type ToolContext, type ToolbarHandlers } from "@/lib/canvas/tool-registry";
 import { subscribeCanvasViewportPreview } from "@/lib/canvas/canvas-live-viewport";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
+import { currentSeedanceAssetId, normalizeSeedanceAssetId, seedanceAssetUri } from "@/lib/seedance-provider-assets";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { CONTENT_MODERATION_ERROR_CODE, generationErrorMessage, isContentModerationError } from "@/lib/generation-error";
 import { useCopyText } from "@/hooks/use-copy-text";
@@ -398,14 +399,19 @@ export function CanvasNodeToolbar({
 }
 
 export function CanvasNodeInfoModal({ node, open, onClose, onMetadataChange, readOnly = false, onUnauthorized }: { node: CanvasNodeData | null; open: boolean; onClose: () => void; onMetadataChange?: (nodeId: string, metadata: Partial<CanvasNodeMetadata>) => void; readOnly?: boolean; onUnauthorized?: () => void }) {
+    const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [view, setView] = useState<"info" | "json">("info");
     const [assetTags, setAssetTags] = useState<string[]>([]);
     const [assetTagInput, setAssetTagInput] = useState("");
     const [assetCategory, setAssetCategory] = useState<CanvasAssetCategory>("other");
+    const [seedanceAssetInput, setSeedanceAssetInput] = useState("");
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
     const batchCount = node?.type === CanvasNodeType.Image ? node.metadata?.batchChildIds?.length || 0 : 0;
     const nodeTypeLabel = node?.type === CanvasNodeType.Text ? "文本" : node?.type === CanvasNodeType.Script ? "分镜脚本" : node?.type === CanvasNodeType.Skill ? "技能" : node?.type === CanvasNodeType.Image ? "图片" : node?.type === CanvasNodeType.Video ? "视频" : node?.type === CanvasNodeType.Audio ? "音频" : node?.type === CanvasNodeType.Drawing ? "绘图" : node?.type === CanvasNodeType.Frame ? "背板" : "生成配置";
+    const storedSeedanceAssetId = normalizeSeedanceAssetId(node?.metadata?.seedanceAssetId);
+    const activeSeedanceAssetId = currentSeedanceAssetId(node?.metadata || {});
+    const staleSeedanceBinding = Boolean(storedSeedanceAssetId && !activeSeedanceAssetId);
     const json = useMemo(() => {
         if (!node) return "";
         return JSON.stringify(
@@ -429,7 +435,8 @@ export function CanvasNodeInfoModal({ node, open, onClose, onMetadataChange, rea
         setAssetTags(node?.metadata?.assetTags || []);
         setAssetTagInput("");
         setAssetCategory(node ? canvasNodeAssetCategory(node) : "other");
-    }, [node?.id, node?.metadata?.assetCategory, node?.metadata?.assetTags]);
+        setSeedanceAssetInput(normalizeSeedanceAssetId(node?.metadata?.seedanceAssetId));
+    }, [node?.id, node?.metadata?.assetCategory, node?.metadata?.assetTags, node?.metadata?.seedanceAssetId]);
 
     const saveAssetCategory = (category: CanvasAssetCategory) => {
         if (!node || node.type !== CanvasNodeType.Image) return;
@@ -456,6 +463,25 @@ export function CanvasNodeInfoModal({ node, open, onClose, onMetadataChange, rea
 
     const removeAssetTag = (tag: string) => {
         saveAssetTags(assetTags.filter((item) => item !== tag));
+    };
+
+    const saveSeedanceAsset = () => {
+        if (!node || node.type !== CanvasNodeType.Image) return;
+        const assetId = normalizeSeedanceAssetId(seedanceAssetInput);
+        if (!assetId) {
+            message.error("请输入有效的 91Token asset-... 素材 ID");
+            return;
+        }
+        setSeedanceAssetInput(assetId);
+        onMetadataChange?.(node.id, { seedanceAssetId: assetId, seedanceAssetStorageKey: node.metadata?.storageKey });
+        message.success("Seedance 素材已绑定");
+    };
+
+    const clearSeedanceAsset = () => {
+        if (!node || node.type !== CanvasNodeType.Image) return;
+        setSeedanceAssetInput("");
+        onMetadataChange?.(node.id, { seedanceAssetId: undefined, seedanceAssetStorageKey: undefined });
+        message.success("Seedance 素材绑定已解除");
     };
 
     const title = (
@@ -569,6 +595,37 @@ export function CanvasNodeInfoModal({ node, open, onClose, onMetadataChange, rea
                                             <span className="px-1 py-1 text-xs opacity-40">{readOnly ? "暂无标签" : "还没有标签，输入后点击“加入”或按 Enter。"}</span>
                                         )}
                                     </div>
+                                </div>
+                            ) : null}
+
+                            {node.type === CanvasNodeType.Image ? (
+                                <div className="rounded-md border p-3" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            <Link2 className="size-4 shrink-0 opacity-55" />
+                                            <div className="truncate text-sm font-semibold">Seedance 素材</div>
+                                        </div>
+                                        <Tag color={activeSeedanceAssetId ? "success" : staleSeedanceBinding ? "warning" : "default"} className="!m-0 shrink-0">
+                                            {activeSeedanceAssetId ? "已绑定" : staleSeedanceBinding ? "需重新绑定" : "未绑定"}
+                                        </Tag>
+                                    </div>
+                                    {readOnly ? (
+                                        <InfoRow label="91Token 素材 ID" value={activeSeedanceAssetId ? seedanceAssetUri(activeSeedanceAssetId) : "未绑定"} />
+                                    ) : (
+                                        <div className="flex gap-2 max-sm:flex-col">
+                                            <Input value={seedanceAssetInput} spellCheck={false} placeholder="asset-20260802122505-xxxxx" onChange={(event) => setSeedanceAssetInput(event.target.value)} onPressEnter={saveSeedanceAsset} />
+                                            <Button type="primary" icon={<Link2 className="size-4" />} disabled={!seedanceAssetInput.trim()} onClick={saveSeedanceAsset}>
+                                                绑定
+                                            </Button>
+                                            {storedSeedanceAssetId ? (
+                                                <Button icon={<Unlink className="size-4" />} onClick={clearSeedanceAsset}>
+                                                    解除
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    )}
+                                    {activeSeedanceAssetId ? <div className="mt-2 break-all text-xs opacity-45">{seedanceAssetUri(activeSeedanceAssetId)}</div> : null}
+                                    {staleSeedanceBinding ? <div className="mt-2 text-xs text-amber-500">图片存储已变化，请确认素材后重新绑定。</div> : null}
                                 </div>
                             ) : null}
 

@@ -2,8 +2,19 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestValidateSyncedPayloadAllowsCanvasAboveLegacyLimit(t *testing.T) {
+	raw := json.RawMessage(`{"chatSessions":"` + strings.Repeat("x", 5<<20) + `"}`)
+	if err := validateSyncedPayload(raw, "画布"); err != nil {
+		t.Fatalf("validateSyncedPayload(canvas) error = %v", err)
+	}
+	if err := validateSyncedPayload(raw, "素材"); err == nil {
+		t.Fatal("validateSyncedPayload(asset) error = nil")
+	}
+}
 
 func TestValidateSyncedPayloadAllowsDataURLMentionInErrorMessage(t *testing.T) {
 	raw, err := json.Marshal(map[string]interface{}{

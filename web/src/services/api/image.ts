@@ -9,6 +9,7 @@ import { channelRequest } from "@/services/api/custom-channel-relay";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 import { withOpenAIPromptCacheKey } from "@/lib/openai-prompt-cache";
+import { withOpenAIChatReasoning, withOpenAIResponsesReasoning } from "@/lib/agent-reasoning";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -939,24 +940,35 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
             return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
         }
         if (requestConfig.interfaceType === "chat-completion") {
-            return await requestStreamingChatCompletion(requestConfig, {
-                model: requestConfig.model,
-                messages: toChatCompletionMessages(withSystemMessage(requestConfig, messages)),
-                tools,
-                tool_choice: toChatCompletionToolChoice(toolChoice),
-                parallel_tool_calls: false,
-            }, onDelta, options);
+            return await requestStreamingChatCompletion(
+                requestConfig,
+                withOpenAIChatReasoning(
+                    {
+                        model: requestConfig.model,
+                        messages: toChatCompletionMessages(withSystemMessage(requestConfig, messages)),
+                        tools,
+                        tool_choice: toChatCompletionToolChoice(toolChoice),
+                        parallel_tool_calls: false,
+                    },
+                    requestConfig.agentReasoningEffort,
+                ),
+                onDelta,
+                options,
+            );
         }
         return await requestStreamingResponse(
             requestConfig,
             withOpenAIPromptCacheKey(
-                {
-                    model: requestConfig.model,
-                    input: toResponseInput(withSystemMessage(requestConfig, messages)),
-                    tools: tools.map(toResponseTool),
-                    tool_choice: toolChoice,
-                    parallel_tool_calls: false,
-                },
+                withOpenAIResponsesReasoning(
+                    {
+                        model: requestConfig.model,
+                        input: toResponseInput(withSystemMessage(requestConfig, messages)),
+                        tools: tools.map(toResponseTool),
+                        tool_choice: toolChoice,
+                        parallel_tool_calls: false,
+                    },
+                    requestConfig.agentReasoningEffort,
+                ),
                 options?.promptCacheKey,
             ),
             onDelta,
@@ -980,9 +992,9 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
                 .sort((a, b) => a.localeCompare(b));
         }
         const request = channelRequest(config, buildApiUrl(config.baseUrl, "/models"), { Authorization: `Bearer ${config.apiKey}` });
-        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(request.url, { headers: request.headers, withCredentials: request.credentials === "include" });
+        const response = await axios.get<{ data?: Array<{ id?: string; name?: string; model?: string }>; error?: { message?: string } }>(request.url, { headers: request.headers, withCredentials: request.credentials === "include" });
         return (response.data.data || [])
-            .map((model) => model.id)
+            .map((model) => model.id || model.name || model.model)
             .filter((id): id is string => Boolean(id))
             .sort((a, b) => a.localeCompare(b));
     } catch (error) {

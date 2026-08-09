@@ -1106,7 +1106,13 @@ func canRunProviderTask(task model.Task) bool {
 	if mode != "video" || !ok || strings.TrimSpace(fmt.Sprint(config["model"])) == "" {
 		return false
 	}
-	return strings.TrimSpace(fmt.Sprint(config["channelId"])) != "" || (strings.TrimSpace(fmt.Sprint(config["baseUrl"])) != "" && strings.TrimSpace(fmt.Sprint(config["apiKey"])) != "")
+	if strings.TrimSpace(fmt.Sprint(config["channelId"])) != "" {
+		return true
+	}
+	if strings.TrimSpace(fmt.Sprint(config["baseUrl"])) == "" {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprint(config["interfaceType"])) == string(model.ChannelInterfaceComfyUIH3) || strings.TrimSpace(fmt.Sprint(config["apiKey"])) != ""
 }
 
 func (s *Service) processAgentStoryboardTask(ctx context.Context, task model.Task) (map[string]interface{}, []map[string]interface{}, error) {
@@ -1251,7 +1257,7 @@ func (s *Service) processStoryboardRowsTask(ctx context.Context, task model.Task
 }
 
 func providerConfigReady(config providerConfig) bool {
-	return strings.TrimSpace(config.Model) != "" && (strings.TrimSpace(config.ChannelID) != "" || (strings.TrimSpace(config.BaseURL) != "" && strings.TrimSpace(config.APIKey) != ""))
+	return strings.TrimSpace(config.Model) != "" && (strings.TrimSpace(config.ChannelID) != "" || (strings.TrimSpace(config.BaseURL) != "" && (config.InterfaceType == string(model.ChannelInterfaceComfyUIH3) || strings.TrimSpace(config.APIKey) != "")))
 }
 
 func parseAgentStoryboardPlan(raw string) (agentStoryboardPlan, error) {

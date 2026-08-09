@@ -100,10 +100,6 @@ export default function ChannelsPage() {
             message.error(headerError);
             return;
         }
-        if (!editingChannel && !values.apiKey?.trim()) {
-            message.error("请填写 API Key 或 Access Key");
-            return;
-        }
         setSaving(true);
         try {
             const payload = { name: values.name.trim(), baseUrl: values.baseUrl.trim(), apiKey: values.apiKey?.trim() || "", secretKey: values.secretKey?.trim() || "", headers: values.headers || [], useGlobalConcurrency: values.useGlobalConcurrency !== false, concurrencyLimit: values.useGlobalConcurrency === false ? values.concurrencyLimit : undefined, enabled: values.enabled !== false };
@@ -168,7 +164,7 @@ export default function ChannelsPage() {
                 <Form form={form} layout="vertical" requiredMark={false}>
                     <Form.Item name="name" label="渠道名称" rules={[{ required: true, message: "请填写渠道名称" }]}><Input placeholder="例如：OpenAI 官方渠道" /></Form.Item>
                     <Form.Item name="baseUrl" label="Base URL" rules={[{ required: true, message: "请填写 Base URL" }]}><Input placeholder="填写渠道 Base URL" /></Form.Item>
-                    <Form.Item name="apiKey" label={editingChannel ? `API Key / Access Key（${configuredSecretText}）` : "API Key / Access Key"} rules={editingChannel ? [] : [{ required: true, message: "请填写 API Key 或 Access Key" }]} extra="OpenAI 兼容协议填写 API Key；即梦官方协议填写 IAM Access Key。"><Input.Password autoComplete="new-password" placeholder={editingChannel ? "留空保留原凭证" : "API Key 或 Access Key"} /></Form.Item>
+                    <Form.Item name="apiKey" label={editingChannel ? `API Key / Access Key（${configuredSecretText}）` : "API Key / Access Key"} extra="OpenAI 兼容协议填写 API Key；ComfyUI H3 本地协议可留空。"><Input.Password autoComplete="new-password" placeholder={editingChannel ? "留空保留原凭证" : "API Key 或 Access Key"} /></Form.Item>
                     <Form.Item name="secretKey" label={editingChannel ? `Secret Key（${channelSecretText(editingChannel)}）` : "Secret Key（可选）"} extra="仅即梦官方等 AK/SK 签名协议需要；其他渠道留空。"><Input.Password autoComplete="new-password" placeholder={editingChannel ? "留空保留原 Secret Key" : "IAM Secret Key"} /></Form.Item>
                     <div className="mb-6"><Form.Item name="headers" noStyle><ChannelHeadersEditor /></Form.Item></div>
                     <Form.Item name="useGlobalConcurrency" label="跟随系统并发配置" valuePropName="checked"><Switch /></Form.Item>

@@ -211,11 +211,11 @@ export default function TasksPage() {
     const queryProviderTask = async (task: GenerationTask) => {
         setActingId(task.id);
         try {
-            const result = await queryFailedVideoProviderTask(task.id);
-            if (!result.recovered) {
-                setTaskLogs(await listTaskLogs(task.id));
-                message.info(`上游任务仍在处理中${result.providerStatus ? `（${result.providerStatus}）` : ""}`);
-                return;
+		const result = await queryFailedVideoProviderTask(task.id);
+		if (!result.recovered) {
+			setTaskLogs(await listTaskLogs(task.id));
+			message.info(result.providerStatus === "failed" && result.billingSettled ? "上游已确认生成失败，预留积分已退回" : `上游任务仍在处理中${result.providerStatus ? `（${result.providerStatus}）` : ""}`);
+			return;
             }
             setDetailTask(result.task);
             setTasks((items) => items.map((item) => (item.id === task.id ? { ...item, ...result.task } : item)));
@@ -631,6 +631,7 @@ function backendProviderConfig(config: ReturnType<typeof resolveModelRequestConf
         audioSpeed: config.audioSpeed,
         audioInstructions: config.audioInstructions,
         capabilityConfig: modelCapabilityConfigFor(config, config.model),
+        reasoningEffort: config.agentReasoningEffort,
         systemPrompt: config.systemPrompt,
     };
 }

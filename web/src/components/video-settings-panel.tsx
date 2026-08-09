@@ -4,7 +4,7 @@ import { Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceRatioOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { normalizeVideoDuration, normalizeVideoResolution, VIDEO_DURATION_MIN } from "@/lib/video-generation-options";
+import { asyncVideoGenerationModelDuration, MINIMAX_H3_RATIO_OPTIONS, MINIMAX_H3_RESOLUTION_OPTIONS, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeVideoDuration, normalizeVideoResolution, normalizeVideoSize, VIDEO_DURATION_MIN } from "@/lib/video-generation-options";
 import { modelCapabilityConfigFor, videoDurationOptions, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
@@ -27,7 +27,14 @@ type VideoSettingsPanelProps = {
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[292px] space-y-3" }: VideoSettingsPanelProps) {
     const profile = modelCapabilityConfigFor(config, config.model).video!;
-    if (resolveModelRequestConfig(config, config.model).interfaceType === "volcengine-jimeng-video") {
+    const interfaceType = resolveModelRequestConfig(config, config.model).interfaceType;
+    if (interfaceType === "async-video-generations") {
+        return <AsyncVideoGenerationsSettingsPanel config={config} theme={theme} showTitle={showTitle} className={className} />;
+    }
+    if (interfaceType === "minimax-h3" || interfaceType === "comfyui-h3") {
+        return <MiniMaxH3SettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+    }
+    if (interfaceType === "volcengine-jimeng-video") {
         return <JiMengVideoSettingsPanel config={config} profile={profile} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
     if (isSeedanceVideoConfig(config)) {
@@ -94,6 +101,58 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </div>
                 </SettingGroup>
                 {profile.generateAudio.supported || profile.watermark.supported ? <SettingGroup title="输出" color={theme.node.muted}><div className="grid grid-cols-2 gap-3 rounded-md px-2" style={{ background: theme.toolbar.itemHover }}>{profile.generateAudio.supported ? <SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}{profile.watermark.supported ? <SwitchRow label="添加水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}</div></SettingGroup> : null}
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function AsyncVideoGenerationsSettingsPanel({ config, theme, showTitle, className }: Omit<VideoSettingsPanelProps, "onConfigChange">) {
+    const model = modelOptionName(config.model || config.videoModel);
+    const duration = asyncVideoGenerationModelDuration(model);
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-sm font-semibold">视频设置</div> : null}
+                <SettingGroup title="时长" color={theme.node.muted}>
+                    <div className="flex h-8 items-center justify-center rounded-md px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.toolbar.itemHover }}>
+                        {duration ? `${duration}s` : "固定"}
+                    </div>
+                </SettingGroup>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function MiniMaxH3SettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
+    const profile = modelCapabilityConfigFor(config, config.model).video!;
+    const resolution = normalizeMiniMaxH3Resolution(config.vquality);
+    const ratio = normalizeMiniMaxH3Ratio(config.size);
+    const durationOptions = videoDurationOptions(profile);
+    const normalizedDuration = normalizeMiniMaxH3Duration(config.videoSeconds);
+    const duration = durationOptions.includes(normalizedDuration) ? normalizedDuration : profile.duration.default;
+    const generateAudio = boolConfig(config.videoGenerateAudio, profile.generateAudio.default);
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-sm font-semibold">视频设置</div> : null}
+                <SettingGroup title="分辨率" color={theme.node.muted}>
+                    <div className="grid grid-cols-2 gap-1.5">
+                        {MINIMAX_H3_RESOLUTION_OPTIONS.map((item) => <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>{item.label}</OptionPill>)}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="比例" color={theme.node.muted}>
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {MINIMAX_H3_RATIO_OPTIONS.map((item) => (
+                            <OptionPill key={item.value} selected={ratio === item.value} theme={theme} onClick={() => onConfigChange("size", item.value)}>{item.label}</OptionPill>
+                        ))}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="时长" color={theme.node.muted}>
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {durationOptions.map((value) => <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>{value}s</OptionPill>)}
+                    </div>
+                </SettingGroup>
+                {profile.generateAudio.supported ? <SettingGroup title="输出" color={theme.node.muted}><div className="rounded-md px-2" style={{ background: theme.toolbar.itemHover }}><SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /></div></SettingGroup> : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -208,9 +267,7 @@ export function videoSecondsLabel(value: string) {
 }
 
 export function normalizeVideoSizeValue(value: string) {
-    if (value === "auto") return "auto";
-    if (/^\d+x\d+$/.test(value || "")) return value;
-    return ["9:16", "2:3", "3:4"].includes(value) ? "720x1280" : "1280x720";
+    return normalizeVideoSize(value);
 }
 
 export function normalizeVideoResolutionValue(value: string) {

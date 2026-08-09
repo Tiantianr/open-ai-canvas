@@ -96,7 +96,7 @@ export function VideoPlayer({ src, mimeType, title = "视频", className, brandC
             onMouseDown={stopCanvasControlInteraction}
         >
             <MediaProvider />
-            <DefaultVideoLayout icons={defaultLayoutIcons} translations={zhCNTranslations} />
+            <DefaultVideoLayout icons={defaultLayoutIcons} translations={zhCNTranslations} noGestures={dataCanvasNoZoom} />
         </MediaPlayer>
     );
 }

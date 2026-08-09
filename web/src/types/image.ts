@@ -8,6 +8,7 @@ export type ReferenceImage = {
     bytes?: number;
     width?: number;
     height?: number;
+    seedanceAssetId?: string;
     source?: {
         kind: "drawing";
         drawingId: string;

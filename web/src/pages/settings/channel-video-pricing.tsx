@@ -52,7 +52,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
                     <div className="text-xs font-medium">模型能力与请求协议</div>
-                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">与运营后台使用同一能力目录；测试会发起真实请求并可能产生供应商费用</div>
+                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">异步 Video Generations、MiniMax H3 与 ComfyUI H3 仅做连接验证；其他测试会发起真实请求并可能产生供应商费用</div>
                 </div>
                 <span className="text-[var(--fs-tiny)] text-foreground/35">{channel.models.length} 个模型</span>
             </div>

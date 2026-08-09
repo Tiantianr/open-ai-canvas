@@ -4,6 +4,7 @@ import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Pencil, Sparkles, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { resolveModelRequestConfig, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { NodeGenerationInput } from "./canvas-node-generation";
@@ -44,6 +45,7 @@ type ComposerCandidate =
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
 export function CanvasConfigComposer({ value, inputs, skillReferences = [], generationMode, metadata, onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
+    const config = useEffectiveConfig();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -52,6 +54,9 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [presetOpen, setPresetOpen] = useState(false);
     const simpleMode = workspaceMode === "simple";
+    const videoInterfaceType = resolveModelRequestConfig(config, metadata?.model || config.videoModel || config.model).interfaceType;
+    const supportsEndFrame = videoInterfaceType !== "async-video-generations";
+    const requiresStartFrameForEndFrame = videoInterfaceType === "minimax-h3";
     const tokens = useMemo(() => parseComposerTokens(value), [value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const videoFrameOptions = useMemo(
@@ -177,7 +182,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
             </div>
             {generationMode === "video" && onMetadataChange && !simpleMode ? (
                 <div className="mb-2 border-y px-1 py-1.5" style={{ borderColor: theme.node.stroke }}>
-                    <CanvasVideoPromptTools metadata={metadata} frameOptions={videoFrameOptions} onMetadataChange={onMetadataChange} />
+                    <CanvasVideoPromptTools metadata={metadata} frameOptions={videoFrameOptions} supportsEndFrame={supportsEndFrame} requiresStartFrameForEndFrame={requiresStartFrameForEndFrame} onMetadataChange={onMetadataChange} />
                 </div>
             ) : null}
             <div className="relative rounded-lg border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>

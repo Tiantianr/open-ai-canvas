@@ -64,6 +64,41 @@ func TestNormalizeTaskInputStillAllowsSecretProtection(t *testing.T) {
 	}
 }
 
+func TestTaskBillingOrderUsesPersistedComfyUIH3Protocol(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.ChannelModel{}); err != nil {
+		t.Fatal(err)
+	}
+	items := []model.ChannelModel{
+		{ID: "local-model", ChannelID: "local-channel", ModelKey: "MiniMax-H3-R2V", Capability: "video", Protocol: model.ChannelInterfaceComfyUIH3, BillingMode: "fixed_request", UnitPriceMicrocredits: 100_000, PriceConfigured: true, Enabled: true},
+		{ID: "cloud-model", ChannelID: "cloud-channel", ModelKey: "MiniMax-H3", Capability: "video", Protocol: model.ChannelInterfaceMiniMaxH3, BillingMode: "fixed_request", UnitPriceMicrocredits: 100_000, PriceConfigured: true, Enabled: true},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{repo: repository.New(db)}
+
+	localOrder, err := svc.taskBillingOrder("user-1", &model.Task{ID: "task-local", Type: "video_image_to_video"}, map[string]any{
+		"mode": "video", "config": map[string]any{"channelId": "local-channel", "model": "MiniMax-H3-R2V", "interfaceType": "minimax-h3", "videoSeconds": "5"},
+	})
+	if err != nil || localOrder != nil {
+		t.Fatalf("local taskBillingOrder() = %#v, error = %v", localOrder, err)
+	}
+
+	cloudOrder, err := svc.taskBillingOrder("user-1", &model.Task{ID: "task-cloud", Type: "video_image_to_video"}, map[string]any{
+		"mode": "video", "config": map[string]any{"channelId": "cloud-channel", "model": "MiniMax-H3", "interfaceType": "comfyui-h3", "videoSeconds": "5"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cloudOrder == nil || cloudOrder.AmountMicrocredits != 100_000 {
+		t.Fatalf("spoofed cloud taskBillingOrder() = %#v", cloudOrder)
+	}
+}
+
 func TestTaskInputRejectsInlineMedia(t *testing.T) {
 	input, err := normalizeTaskInput(map[string]any{
 		"referenceImages": []providerMedia{{DataURL: testReferenceImageDataURL}},

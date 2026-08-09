@@ -70,6 +70,27 @@ func DefaultModelCapabilityConfig(protocol string) *ModelCapabilityConfig {
 		DefaultOperation:  "text_to_video",
 	}
 	switch model.ChannelInterfaceType(protocol) {
+	case model.ChannelInterfaceAsyncVideoGenerations:
+		video.References.PromptMaxChars = 1000000
+		video.References.MaxImages = asyncVideoGenerationsDefaultMaxImages
+		video.References.MaxImageBytes = asyncVideoGenerationsMaxImageBytes
+	case model.ChannelInterfaceMiniMaxH3:
+		video.References = VideoReferenceConfig{PromptMaxChars: 7000, MaxImages: 9, MaxImageBytes: miniMaxH3MaxImageBytes, MaxVideos: 3, MaxVideoBytes: miniMaxH3MaxVideoBytes, MaxAudios: 3, MaxAudioBytes: miniMaxH3MaxAudioBytes}
+		video.Duration = VideoDurationConfig{Selection: "range", Min: 4, Max: 15, Step: 1, Default: 5}
+		video.Ratios = []string{"adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}
+		video.DefaultRatio = "adaptive"
+		video.Resolutions = []string{"768p", "2k"}
+		video.DefaultResolution = "768p"
+	case model.ChannelInterfaceComfyUIH3:
+		video.References = VideoReferenceConfig{PromptMaxChars: comfyUIH3MaxPromptRunes, MaxImages: comfyUIH3MaxImages, MaxImageBytes: comfyUIH3MaxImageBytes, MaxVideos: 0, MaxVideoBytes: 0, MaxAudios: 0, MaxAudioBytes: 0}
+		video.Duration = VideoDurationConfig{Selection: "range", Min: 5, Max: 15, Step: 1, Default: 5}
+		video.Ratios = []string{"adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}
+		video.DefaultRatio = "16:9"
+		video.Resolutions = []string{"768p", "2k"}
+		video.DefaultResolution = "768p"
+		video.GenerateAudio = VideoBooleanConfig{Supported: true, Default: true}
+		video.Operations = []string{"image_to_video"}
+		video.DefaultOperation = "image_to_video"
 	case model.ChannelInterfaceVolcengineJiMengVideo:
 		video.Duration = VideoDurationConfig{Selection: "enum", Values: []int{5, 10}, Default: 5}
 		video.Resolutions = []string{"720p"}
@@ -102,6 +123,19 @@ func DecodeModelCapabilityConfig(raw string) (*ModelCapabilityConfig, error) {
 		return nil, err
 	}
 	return &value, nil
+}
+
+func decodeModelCapabilityConfigWithProtocolDefault(raw string, protocol string) (*ModelCapabilityConfig, error) {
+	profile, err := DecodeModelCapabilityConfig(raw)
+	if err != nil || (profile != nil && profile.Video != nil) {
+		return profile, err
+	}
+	switch model.ChannelInterfaceType(protocol) {
+	case model.ChannelInterfaceAsyncVideoGenerations, model.ChannelInterfaceMiniMaxH3, model.ChannelInterfaceComfyUIH3:
+		return DefaultModelCapabilityConfig(protocol), nil
+	default:
+		return profile, nil
+	}
 }
 
 func NormalizeModelCapabilityConfig(capability string, protocol string, input *ModelCapabilityConfig) (*ModelCapabilityConfig, error) {
@@ -194,7 +228,7 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 	if err != nil {
 		return BadAuthRequest("当前系统渠道模型未配置或已停用")
 	}
-	profile, err := DecodeModelCapabilityConfig(item.CapabilityConfigJSON)
+	profile, err := decodeModelCapabilityConfigWithProtocolDefault(item.CapabilityConfigJSON, taskInput.Config.InterfaceType)
 	if err != nil || profile == nil || profile.Video == nil {
 		return BadAuthRequest("当前视频模型尚未配置能力参数")
 	}
@@ -236,7 +270,15 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 	if input.Config.Size != "" && !videoRatioAllowed(profile.Ratios, input.Config.Size) {
 		return BadAuthRequest("画面比例不在当前模型支持范围内")
 	}
-	if input.Config.VQuality != "" && !containsCapabilityString(profile.Resolutions, normalizeResolution(input.Config.VQuality)) {
+	protocol := model.ChannelInterfaceType(input.Config.InterfaceType)
+	resolution := input.Config.VQuality
+	if protocol == model.ChannelInterfaceMiniMaxH3 {
+		resolution = miniMaxH3Resolution(resolution)
+	}
+	if protocol == model.ChannelInterfaceComfyUIH3 {
+		resolution = comfyUIH3Resolution(resolution)
+	}
+	if resolution != "" && !containsCapabilityString(profile.Resolutions, normalizeResolution(resolution)) {
 		return BadAuthRequest("输出分辨率不在当前模型支持范围内")
 	}
 	operation := metadataString(input.Metadata, "videoEditOperation")
@@ -247,10 +289,24 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 			operation = profile.DefaultOperation
 		}
 	}
+	if protocol == model.ChannelInterfaceMiniMaxH3 && operation == "extend" {
+		operation = "image_to_video"
+	}
 	if !containsCapabilityString(profile.Operations, operation) {
 		return BadAuthRequest("当前视频模型不支持该生成模式")
 	}
 	return nil
+}
+
+func comfyUIH3Resolution(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "720", "720p", "768", "768p":
+		return "768p"
+	case "2k", "2160", "2160p":
+		return "2k"
+	default:
+		return value
+	}
 }
 
 func videoDurationAllowed(value VideoDurationConfig, seconds int) bool {
@@ -302,6 +358,9 @@ func normalizeResolution(value string) string {
 	value = strings.TrimSuffix(value, "p")
 	if value == "4k" {
 		return "2160p"
+	}
+	if strings.HasSuffix(value, "k") {
+		return value
 	}
 	return value + "p"
 }

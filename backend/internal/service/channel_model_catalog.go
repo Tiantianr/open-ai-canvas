@@ -28,8 +28,9 @@ type channelModelsPayload struct {
 }
 
 type channelModelItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Model string `json:"model"`
 }
 
 func (s *Service) FetchChannelModels(ctx context.Context, actor *model.User, input ChannelModelsRequest) ([]string, error) {
@@ -101,7 +102,7 @@ func (s *Service) FetchChannelModels(ctx context.Context, actor *model.User, inp
 	seen := make(map[string]bool, len(items))
 	models := make([]string, 0, len(items))
 	for _, item := range items {
-		name := strings.TrimPrefix(strings.TrimSpace(firstNonEmpty(item.ID, item.Name)), "models/")
+		name := strings.TrimPrefix(strings.TrimSpace(firstNonEmpty(item.ID, item.Name, item.Model)), "models/")
 		if name == "" || seen[name] {
 			continue
 		}

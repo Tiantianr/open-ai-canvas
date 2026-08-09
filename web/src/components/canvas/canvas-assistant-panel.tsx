@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Copy, Cpu, History, MessageSquareText, Plus, ScrollText, Settings2, Trash2, X } from "lucide-react";
+import { BrainCircuit, Copy, Cpu, History, MessageSquareText, Plus, ScrollText, Settings2, Trash2, X } from "lucide-react";
 import { Button, Modal, Segmented, Select, Tooltip } from "antd";
 import { motion } from "motion/react";
 
 import { modelDisplayName, modelOptionName, normalizeModelOptionValue, resolveModelChannel, resolveModelRequestConfig, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { AGENT_REASONING_EFFORT_OPTIONS, normalizeAgentReasoningEffort, type AgentReasoningEffort } from "@/lib/agent-reasoning";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
@@ -119,7 +120,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
 ];
 type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
-type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
+type OnlineAgentLogContext = { model: string; reasoningEffort: AgentReasoningEffort; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
 type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
@@ -272,6 +273,25 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, project
         }));
     };
 
+    const markCinematicSessionLongRunning = (sessionId: string, backendSessionId: string) => {
+        const observedAt = new Date().toISOString();
+        updateSession(sessionId, (session) => {
+            const pending = session.pendingBackendSession;
+            if (pending?.id !== backendSessionId) return session;
+            return {
+                ...session,
+                messages: upsertAssistantMessage(session.messages, {
+                    id: pending.messageId,
+                    role: "assistant",
+                    title: "影视项目仍在生成",
+                    text: "生成内容较长，后端仍在处理。可以稍后返回，完成后会继续写回当前画布。",
+                    detail: { kind: "cinematic", backendSessionId, status: "pending", startedAt: pending.startedAt, longRunning: true, observedAt },
+                }),
+                updatedAt: observedAt,
+            };
+        });
+    };
+
     const completeCinematicSession = (sessionId: string, backendSessionId: string, ops: CanvasAgentOp[], recovered = false) => {
         updateSession(sessionId, (session) => {
             const pending = session.pendingBackendSession;
@@ -340,6 +360,11 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, project
                         setPendingCinematicSession(sessionId, backendSessionId);
                         addOnlineLog("后端影视 Agent 会话已创建", { backendSessionId });
                         onCreated?.(backendSessionId);
+                    },
+                    onLongRunning: () => {
+                        if (!backendSessionId) return;
+                        markCinematicSessionLongRunning(sessionId, backendSessionId);
+                        addOnlineLog("后端影视 Agent 仍在生成", { backendSessionId });
                     },
                 },
             );
@@ -653,7 +678,10 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, project
         setIsRunning(true);
         addOnlineLog("恢复后端影视 Agent 会话", { backendSessionId: pending.id });
         try {
-            const detail = await resumeCinematicAgentSession(pending.id, { signal: controller.signal });
+            const detail = await resumeCinematicAgentSession(pending.id, {
+                signal: controller.signal,
+                onLongRunning: () => markCinematicSessionLongRunning(sessionId, pending.id),
+            });
             const ops = requireOps(JSON.parse(cinematicAgentSessionOpsJson(detail)));
             executeOps(ops);
             completeCinematicSession(sessionId, pending.id, ops, true);
@@ -737,7 +765,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, project
                             onDelete={(id) => setDeleteChatIds([id])}
                         />
                     ) : view === "log" ? (
-                        <OnlineAgentLogView logs={onlineLogs} theme={theme} context={{ model: activeModel, running: agentBusy, confirmTools, messages: messages.length, nodes: snapshot.nodes.length, connections: snapshot.connections.length }} onClear={() => setOnlineLogs([])} />
+                        <OnlineAgentLogView logs={onlineLogs} theme={theme} context={{ model: activeModel, reasoningEffort: effectiveConfig.agentReasoningEffort, running: agentBusy, confirmTools, messages: messages.length, nodes: snapshot.nodes.length, connections: snapshot.connections.length }} onClear={() => setOnlineLogs([])} />
                     ) : messages.length ? (
                         <>
                             {messages.map((message) => (
@@ -782,6 +810,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, project
                         left={
                             <>
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
+                                <AgentReasoningEffortPicker config={effectiveConfig} value={effectiveConfig.agentReasoningEffort} onChange={(effort) => updateConfig("agentReasoningEffort", effort)} />
                                 {cinematicEntryActive ? <span className="ml-2 inline-flex h-6 items-center rounded-md px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.spatial.surface, color: theme.node.muted }}>影视项目</span> : null}
                             </>
                         }
@@ -882,6 +911,33 @@ function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; v
                 title={current ? `${modelDisplayName(config, current)} · ${resolveModelChannel(config, current).name}` : "选择文本模型"}
             />
         </div>
+    );
+}
+
+function AgentReasoningEffortPicker({ config, value, onChange }: { config: AiConfig; value: AgentReasoningEffort; onChange: (effort: AgentReasoningEffort) => void }) {
+    const requestConfig = resolveModelRequestConfig(config, config.textModel || config.model);
+    const supported = requestConfig.apiFormat === "openai" && (!requestConfig.interfaceType || requestConfig.interfaceType === "openai-response" || requestConfig.interfaceType === "chat-completion");
+    const current = normalizeAgentReasoningEffort(value);
+    const displayed = supported ? current : "auto";
+    const label = AGENT_REASONING_EFFORT_OPTIONS.find((option) => option.value === displayed)?.label || "自动";
+    const title = supported ? `思考强度：${label}` : "当前文本协议不支持思考强度";
+    return (
+        <Tooltip title={title}>
+            <div className="w-[88px] shrink-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <Select<AgentReasoningEffort>
+                    size="small"
+                    variant="borderless"
+                    value={displayed}
+                    disabled={!supported}
+                    className="w-full"
+                    popupMatchSelectWidth={136}
+                    options={AGENT_REASONING_EFFORT_OPTIONS.map((option) => ({ ...option }))}
+                    labelRender={() => <span className="flex min-w-0 items-center gap-1"><BrainCircuit className="size-3.5 shrink-0" /><span className="truncate">{label}</span></span>}
+                    onChange={onChange}
+                    aria-label="选择 Agent 思考强度"
+                />
+            </div>
+        </Tooltip>
     );
 }
 
@@ -1093,6 +1149,7 @@ function formatOnlineLogText(logs: OnlineAgentLog[], context: OnlineAgentLogCont
     const head = [
         "影策网站 Agent 诊断日志",
         `model: ${context.model || "none"}`,
+        `reasoningEffort: ${context.reasoningEffort}`,
         `running: ${context.running}`,
         `confirmTools: ${context.confirmTools}`,
         `messages: ${context.messages}`,
@@ -1562,6 +1619,7 @@ function backendAgentProviderConfig(config: ReturnType<typeof resolveModelReques
         audioFormat: config.audioFormat,
         audioSpeed: config.audioSpeed,
         audioInstructions: config.audioInstructions,
+        reasoningEffort: config.agentReasoningEffort,
         systemPrompt: config.systemPrompt,
     };
 }

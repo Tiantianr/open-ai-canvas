@@ -98,7 +98,7 @@ export default function SettingsPage() {
         const ready = config.channels.some(isChannelReady);
         if (!ready) {
             selectSection("channels");
-            message.error(shouldPromptContinue ? "请先完成至少一个渠道的 Base URL、API Key 和模型配置" : "当前没有可用渠道，请先完成连接信息和模型配置");
+            message.error(shouldPromptContinue ? "请先完成至少一个渠道的 Base URL 和模型配置" : "当前没有可用渠道，请先完成连接信息和模型配置");
             return;
         }
         message.success("配置已保存，正在返回创作页面");
@@ -607,7 +607,7 @@ function channelConnectionError(channel: ModelChannel) {
     } catch {
         return "Base URL 格式不正确";
     }
-    if (!channel.apiKey.trim()) return "请填写 API Key / Access Key";
+    if (!channel.apiKey.trim() && !channelAllowsBlankApiKey(channel)) return "请填写 API Key / Access Key";
     if (requiresSecretKey(channel) && !channel.secretKey?.trim()) return "当前协议需要填写 Secret Key";
     return "";
 }
@@ -618,6 +618,11 @@ function channelConnectionSignature(channel: ModelChannel) {
 
 function channelValidationError(channel: ModelChannel) {
     return channelConnectionError(channel) || validateChannelHeaders(channel.headers) || (!channel.models.length ? "请添加至少一个模型" : "");
+}
+
+function channelAllowsBlankApiKey(channel: ModelChannel) {
+    if (channel.interfaceType === "comfyui-h3") return true;
+    return channel.models.length > 0 && channel.models.every((model) => channel.modelCosts?.find((item) => item.model === model)?.protocol === "comfyui-h3");
 }
 
 function isChannelReady(channel: ModelChannel) {

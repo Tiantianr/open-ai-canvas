@@ -46,6 +46,7 @@ export function ChannelModelManager({ channel, onClose, onChanged }: { channel: 
     const [form] = Form.useForm<FormValues>();
     const billingMode = Form.useWatch("billingMode", form) || "fixed_request";
     const modelCapability = Form.useWatch("capability", form);
+    const modelProtocol = Form.useWatch("protocol", form);
     const modelKey = Form.useWatch("modelKey", form) || "";
 
     const reload = async () => {
@@ -281,7 +282,7 @@ export function ChannelModelManager({ channel, onClose, onChanged }: { channel: 
                         <Switch />
                     </Form.Item>
                     <div className="mb-2 text-xs text-foreground/45">
-                        测试会向上游发起真实请求并可能产生供应商费用{modelCapability === "video" ? "，视频测试可能需要数分钟" : ""}。
+                        {modelCapability === "video" && (modelProtocol === "async-video-generations" || modelProtocol === "minimax-h3" || modelProtocol === "comfyui-h3") ? `${modelProtocol === "comfyui-h3" ? "ComfyUI H3" : modelProtocol === "minimax-h3" ? "MiniMax H3" : "异步 Video Generations"} 测试仅读取上游状态接口，不创建视频任务。` : `测试会向上游发起真实请求并可能产生供应商费用${modelCapability === "video" ? "，视频测试可能需要数分钟" : ""}。`}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                         <Button icon={<FlaskConical className="size-4" />} loading={testing} disabled={saving} onClick={() => void testModel()}>测试模型</Button>

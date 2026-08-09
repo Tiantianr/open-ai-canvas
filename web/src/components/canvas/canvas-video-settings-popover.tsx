@@ -5,8 +5,9 @@ import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { asyncVideoGenerationModelDuration, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution } from "@/lib/video-generation-options";
+import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { AiConfig } from "@/stores/use-config-store";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
@@ -21,7 +22,14 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
-    const summary = `${videoResolutionLabel(config.vquality)} · ${videoSizeLabel(config.size)} · ${videoSecondsLabel(config.videoSeconds)}`;
+    const requestConfig = resolveModelRequestConfig(config, config.model);
+    const fixedDuration = requestConfig.interfaceType === "async-video-generations" ? asyncVideoGenerationModelDuration(modelOptionName(config.model || config.videoModel)) : undefined;
+    const isMiniMaxH3 = requestConfig.interfaceType === "minimax-h3" || requestConfig.interfaceType === "comfyui-h3";
+    const summary = fixedDuration
+        ? `${fixedDuration}s`
+        : isMiniMaxH3
+            ? `${normalizeMiniMaxH3Resolution(config.vquality)} · ${normalizeMiniMaxH3Ratio(config.size)} · ${normalizeMiniMaxH3Duration(config.videoSeconds)}s`
+            : `${videoResolutionLabel(config.vquality)} · ${videoSizeLabel(config.size)} · ${videoSecondsLabel(config.videoSeconds)}`;
 
     useEffect(() => {
         if (!open) return;

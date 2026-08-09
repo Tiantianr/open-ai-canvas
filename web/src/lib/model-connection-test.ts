@@ -1,12 +1,12 @@
 import { requestAudioGeneration } from "@/services/api/audio";
-import { requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { createVideoGenerationTask } from "@/services/api/video";
-import { defaultConfig, encodeChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { fetchImageModels, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { createVideoGenerationTask, testComfyUIH3Connection, testMiniMaxH3Connection } from "@/services/api/video";
+import { defaultConfig, encodeChannelModel, modelOptionName, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
-    if (!channel.apiKey.trim()) throw new Error("请先填写 API Key");
+    if (!channel.apiKey.trim() && protocol !== "comfyui-h3") throw new Error("请先填写 API Key");
     const selectedModel = encodeChannelModel(channel.id, model);
     const modelCost = channel.modelCosts?.find((item) => item.model === model);
     const testProtocol = channel.apiFormat === "gemini" && !modelCost?.protocol ? undefined : protocol;
@@ -61,6 +61,22 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
             await requestAudioGeneration(config, "Model test.");
             return "音频生成正常";
         case "video": {
+            if (protocol === "async-video-generations") {
+                const models = await fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat });
+                if (!models.some((item) => modelOptionName(item) === modelOptionName(model))) throw new Error(`上游模型目录不包含 ${modelOptionName(model)}`);
+                return "模型目录验证正常，未创建视频任务";
+            }
+            if (protocol === "minimax-h3") {
+                if (modelOptionName(model).toLowerCase() !== "minimax-h3") throw new Error("MiniMax H3 协议仅支持模型 MiniMax-H3");
+                await testMiniMaxH3Connection(config);
+                return "MiniMax H3 鉴权验证正常，未创建视频任务";
+            }
+            if (protocol === "comfyui-h3") {
+                const modelName = modelOptionName(model).toLowerCase();
+                if (modelName !== "minimax-h3" && modelName !== "minimax-h3-r2v") throw new Error("ComfyUI H3 协议仅支持模型 MiniMax-H3-R2V");
+                await testComfyUIH3Connection(config);
+                return "ComfyUI H3 节点验证正常，未创建视频任务";
+            }
             const task = await createVideoGenerationTask(config, "A static gray circle on a white background.");
             return `视频任务已创建（${task.id}）`;
         }

@@ -182,6 +182,33 @@ func TestTextResponseInputIncludesReferenceMedia(t *testing.T) {
 	}
 }
 
+func TestApplyProviderReasoningUsesProtocolSpecificFields(t *testing.T) {
+	config := providerConfig{ReasoningEffort: " HIGH "}
+	responsesBody := map[string]interface{}{"model": "test-model"}
+	applyResponsesReasoning(responsesBody, config)
+	if !reflect.DeepEqual(responsesBody["reasoning"], map[string]interface{}{"effort": "high"}) {
+		t.Fatalf("Responses reasoning = %#v", responsesBody["reasoning"])
+	}
+
+	chatBody := map[string]interface{}{"model": "test-model"}
+	applyChatCompletionsReasoning(chatBody, config)
+	if chatBody["reasoning_effort"] != "high" {
+		t.Fatalf("Chat reasoning_effort = %#v", chatBody["reasoning_effort"])
+	}
+
+	for _, value := range []string{"", "auto", "unsupported"} {
+		body := map[string]interface{}{}
+		applyResponsesReasoning(body, providerConfig{ReasoningEffort: value})
+		applyChatCompletionsReasoning(body, providerConfig{ReasoningEffort: value})
+		if _, exists := body["reasoning"]; exists {
+			t.Fatalf("reasoning should be omitted for %q", value)
+		}
+		if _, exists := body["reasoning_effort"]; exists {
+			t.Fatalf("reasoning_effort should be omitted for %q", value)
+		}
+	}
+}
+
 func TestTextChatContentIncludesReferenceMedia(t *testing.T) {
 	input := canvasGenerationInput{
 		Prompt: "describe this image",
@@ -232,6 +259,37 @@ func TestTextReferenceImageRejectsInternalAssetURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("textResponseInput() error = nil, want error")
+	}
+}
+
+func TestHydrateProviderMediaPrefersSeedanceAssetURL(t *testing.T) {
+	media := providerMedia{
+		URL:        " asset://asset-20260802122505-mb5fl ",
+		DataURL:    testReferenceImageDataURL,
+		StorageKey: "resource:missing-resource",
+	}
+	if err := (&Service{}).hydrateProviderMedia("user-1", &media, true); err != nil {
+		t.Fatalf("hydrateProviderMedia() error = %v", err)
+	}
+	if media.URL != "asset://asset-20260802122505-mb5fl" || media.DataURL != "" || media.StorageKey != "" {
+		t.Fatalf("media = %#v", media)
+	}
+}
+
+func TestSeedanceContentUsesValidatedAssetURL(t *testing.T) {
+	content, err := seedanceContent(canvasGenerationInput{
+		Prompt:          "make it move",
+		ReferenceImages: []providerMedia{{ID: "image-1", URL: "ASSET://asset-character-1"}},
+	})
+	if err != nil {
+		t.Fatalf("seedanceContent() error = %v", err)
+	}
+	imageURL, ok := content[1]["image_url"].(map[string]interface{})
+	if !ok || imageURL["url"] != "asset://asset-character-1" {
+		t.Fatalf("content = %#v", content)
+	}
+	if _, _, err := normalizedProviderAssetURL("asset://asset-character-1/path"); err == nil {
+		t.Fatal("normalizedProviderAssetURL() accepted a path")
 	}
 }
 
@@ -449,9 +507,8 @@ func TestRunVideoTaskUsesJSONForGrokVideo(t *testing.T) {
 			if body["image"] != testReferenceImageDataURL {
 				t.Errorf("image = %#v", body["image"])
 			}
-			images, ok := body["images"].([]interface{})
-			if !ok || len(images) != 1 || images[0] != testReferenceImageDataURL {
-				t.Errorf("images = %#v", body["images"])
+			if _, exists := body["images"]; exists {
+				t.Errorf("request includes duplicate images field: %#v", body["images"])
 			}
 			_, _ = w.Write([]byte(`{"id":"video-1","status":"queued"}`))
 		case "GET /v1/videos/video-1":
@@ -477,6 +534,20 @@ func TestRunVideoTaskUsesJSONForGrokVideo(t *testing.T) {
 	video, ok := result["video"].(map[string]interface{})
 	if !ok || video["dataUrl"] != "data:video/mp4;base64,dmlkZW8=" {
 		t.Fatalf("video = %#v", result["video"])
+	}
+}
+
+func TestLegacyGrokVideoBodyRejectsMultipleReferenceImages(t *testing.T) {
+	_, err := grokVideoBody(canvasGenerationInput{
+		Config: providerConfig{Model: "grok-video"},
+		ReferenceImages: []providerMedia{
+			{ID: "image-1", DataURL: testReferenceImageDataURL},
+			{ID: "image-2", DataURL: testReferenceImageDataURL},
+		},
+		Metadata: map[string]interface{}{"videoEditOperation": "image_to_video"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "只支持 1 张参考图") {
+		t.Fatalf("grokVideoBody() error = %v", err)
 	}
 }
 

@@ -392,7 +392,7 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 		if !available || !enforceRateLimit(c, "canvas-write:"+user.ID, policy.Request.CanvasWritePerMinute, time.Minute) {
 			return
 		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 5<<20)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxSyncedCanvasPayloadBytes+(1<<20))
 		var req struct {
 			Project json.RawMessage `json:"project"`
 		}

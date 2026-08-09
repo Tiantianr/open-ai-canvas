@@ -1,9 +1,10 @@
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
-import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
+import { resourceIdFromStorageKey, resourceIdFromUrl, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
 import { createGenerationTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { withSeedanceAssetReference } from "@/lib/seedance-provider-assets";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -53,7 +54,7 @@ export async function runBackendGenerationTask({
     onTaskUpdate,
 }: BackendGenerationTaskOptions) {
     throwIfAborted(signal);
-    const prepared = await prepareGenerationReferences({ referenceImages, referenceVideos, referenceAudios, mask });
+    const prepared = await prepareGenerationReferences({ referenceImages, referenceVideos, referenceAudios, mask, mode, config });
     throwIfAborted(signal);
     return createAndWaitGenerationTask({ projectId, mode, prompt, config, referenceImages, referenceVideos, signal, metadata, onTaskUpdate }, prepared);
 }
@@ -73,8 +74,9 @@ function throwIfAborted(signal?: AbortSignal) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 }
 
-async function prepareGenerationReferences({ referenceImages = [], referenceVideos = [], referenceAudios = [], mask }: Pick<BackendGenerationTaskOptions, "referenceImages" | "referenceVideos" | "referenceAudios" | "mask">): Promise<PreparedGenerationReferences> {
-    const preparedImages = await Promise.all(referenceImages.map(prepareBackendImageReference));
+async function prepareGenerationReferences({ referenceImages = [], referenceVideos = [], referenceAudios = [], mask, mode, config }: Pick<BackendGenerationTaskOptions, "referenceImages" | "referenceVideos" | "referenceAudios" | "mask" | "mode" | "config">): Promise<PreparedGenerationReferences> {
+    const useSeedanceAssets = mode === "video" && resolveModelRequestConfig(config, config.model).interfaceType === "volcengine-ark-video";
+    const preparedImages = await Promise.all(referenceImages.map((image) => prepareBackendImageReference(withSeedanceAssetReference(image, useSeedanceAssets))));
     const preparedVideos = await Promise.all(referenceVideos.map(prepareBackendMediaReference));
     const preparedAudios = await Promise.all(referenceAudios.map(prepareBackendMediaReference));
     const preparedMask = mask ? await prepareBackendImageReference(mask) : undefined;
@@ -106,8 +108,9 @@ async function createAndWaitGenerationTask({ projectId, mode, prompt, config, re
 }
 
 async function prepareBackendMediaReference(media: ReferenceVideo | ReferenceAudio) {
-    if (resourceIdFromStorageKey(media.storageKey)) return backendMediaReference(media, { storageKey: media.storageKey });
     const url = media.url || "";
+    const resourceId = resourceIdFromStorageKey(media.storageKey) || resourceIdFromUrl(url);
+    if (resourceId) return backendMediaReference(media, { storageKey: resourceStorageKey(resourceId) });
     if (/^https?:\/\//i.test(url)) return backendMediaReference(media, { url });
     let blob: Blob | null = null;
     if (media.storageKey) blob = await getMediaBlob(media.storageKey);
@@ -123,8 +126,10 @@ async function prepareBackendMediaReference(media: ReferenceVideo | ReferenceAud
 }
 
 async function prepareBackendImageReference(image: ReferenceImage) {
-    if (resourceIdFromStorageKey(image.storageKey)) return backendImageReference(image, { storageKey: image.storageKey });
+    if (image.url?.startsWith("asset://")) return backendImageReference(image, { url: image.url });
     const sourceUrl = image.url || image.dataUrl;
+    const resourceId = resourceIdFromStorageKey(image.storageKey) || resourceIdFromUrl(sourceUrl);
+    if (resourceId) return backendImageReference(image, { storageKey: resourceStorageKey(resourceId) });
     if (/^https?:\/\//i.test(sourceUrl)) return backendImageReference(image, { url: sourceUrl });
     const blob = image.storageKey ? await getImageBlob(image.storageKey) : sourceUrl ? await (await fetch(sourceUrl)).blob() : null;
     if (!blob) throw new Error("参考图片尚未保存，请重新上传后再生成");

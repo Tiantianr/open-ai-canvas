@@ -3,7 +3,7 @@ import { ArrowUp, AtSign, Boxes, ChevronDown, FileText, ImageIcon, ImagePlus, Ma
 import { Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { configuredModelMatchesCapability, defaultConfig, modelOptionName, resolveModelChannel, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { configuredModelMatchesCapability, defaultConfig, modelOptionName, resolveModelChannel, resolveModelRequestConfig, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
@@ -44,6 +44,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const simpleMode = workspaceMode === "simple";
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const videoInterfaceType = resolveModelRequestConfig(config, config.model).interfaceType;
+    const supportsEndFrame = videoInterfaceType !== "async-video-generations";
+    const requiresStartFrameForEndFrame = videoInterfaceType === "minimax-h3";
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const savedPrompt = node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
@@ -295,7 +298,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </button>
                     {paramsExpanded ? (
                         <div className="border-t p-0.5" style={{ borderColor: insetBorder }}>
-                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
+                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} supportsEndFrame={supportsEndFrame} requiresStartFrameForEndFrame={requiresStartFrameForEndFrame} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
                         </div>
                     ) : null}
                 </div>
@@ -337,7 +340,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </div>
                     {mode === "video" && !simpleMode ? (
                         <div className="shrink-0 rounded-md border p-0.5" style={{ background: controlSurface, borderColor: insetBorder }}>
-                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
+                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} supportsEndFrame={supportsEndFrame} requiresStartFrameForEndFrame={requiresStartFrameForEndFrame} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
                         </div>
                     ) : null}
                     <div className="shrink-0">{renderComposerControls(true)}</div>

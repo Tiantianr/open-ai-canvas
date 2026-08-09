@@ -163,6 +163,8 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    seedanceAssetId?: string;
+    seedanceAssetStorageKey?: string;
     assetId?: string;
     assetTags?: string[];
     assetCategory?: "character" | "environment" | "wardrobe" | "prop" | "weapon" | "style" | "other";

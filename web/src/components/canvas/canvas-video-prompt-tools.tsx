@@ -22,6 +22,8 @@ type CompactMenuItem = {
 type CanvasVideoPromptToolsProps = {
     metadata?: CanvasNodeMetadata;
     frameOptions: VideoFrameOption[];
+    supportsEndFrame?: boolean;
+    requiresStartFrameForEndFrame?: boolean;
     onMetadataChange: (patch: Partial<CanvasNodeMetadata>) => void;
 };
 
@@ -31,13 +33,21 @@ const MENU_MARGIN = 8;
 const MENU_ITEM_HEIGHT = 28;
 const CONTROL_TEXT_STYLE: CSSProperties = { fontFamily: "inherit", fontSize: 11, fontWeight: 400, letterSpacing: 0, lineHeight: 1 };
 
-export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChange }: CanvasVideoPromptToolsProps) {
+export function CanvasVideoPromptTools({ metadata, frameOptions, supportsEndFrame = true, requiresStartFrameForEndFrame = false, onMetadataChange }: CanvasVideoPromptToolsProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const startFrame = metadata?.videoStartFrameNodeId || EMPTY_FRAME_VALUE;
     const endFrame = metadata?.videoEndFrameNodeId || EMPTY_FRAME_VALUE;
 
+    useEffect(() => {
+        if (metadata?.videoEndFrameNodeId && (!supportsEndFrame || (requiresStartFrameForEndFrame && !metadata?.videoStartFrameNodeId))) onMetadataChange({ videoEndFrameNodeId: undefined });
+    }, [metadata?.videoEndFrameNodeId, metadata?.videoStartFrameNodeId, onMetadataChange, requiresStartFrameForEndFrame, supportsEndFrame]);
+
     const setFrame = (key: "videoStartFrameNodeId" | "videoEndFrameNodeId", value: string) => {
         const next = value === EMPTY_FRAME_VALUE ? undefined : value;
+        if (key === "videoStartFrameNodeId" && !next && requiresStartFrameForEndFrame) {
+            onMetadataChange({ videoStartFrameNodeId: undefined, videoEndFrameNodeId: undefined });
+            return;
+        }
         onMetadataChange(key === "videoStartFrameNodeId" ? { videoStartFrameNodeId: next } : { videoEndFrameNodeId: next });
     };
 
@@ -45,30 +55,31 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
 
     return (
         <div
-            className="grid min-w-0 grid-cols-2 items-center gap-1"
+            className={`grid min-w-0 ${supportsEndFrame ? "grid-cols-2" : "grid-cols-1"} items-center gap-1`}
             data-canvas-no-zoom
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
         >
             <FrameMenu label="首帧" value={startFrame} options={frameOptions} theme={theme} onChange={(value) => setFrame("videoStartFrameNodeId", value)} />
-            <FrameMenu label="尾帧" value={endFrame} options={frameOptions} theme={theme} onChange={(value) => setFrame("videoEndFrameNodeId", value)} />
+            {supportsEndFrame ? <FrameMenu label="尾帧" value={endFrame} options={frameOptions} theme={theme} disabled={requiresStartFrameForEndFrame && startFrame === EMPTY_FRAME_VALUE} onChange={(value) => setFrame("videoEndFrameNodeId", value)} /> : null}
         </div>
     );
 }
 
-function FrameMenu({ label, value, options, theme, onChange }: { label: string; value: string; options: VideoFrameOption[]; theme: CanvasTheme; onChange: (value: string) => void }) {
+function FrameMenu({ label, value, options, theme, disabled = false, onChange }: { label: string; value: string; options: VideoFrameOption[]; theme: CanvasTheme; disabled?: boolean; onChange: (value: string) => void }) {
     const selected = options.find((item) => item.nodeId === value);
     const items = [{ value: EMPTY_FRAME_VALUE, label: "不指定" }, ...options.map((option) => ({ value: option.nodeId, label: `${option.label} · ${option.title}`, previewUrl: option.previewUrl }))];
     return (
         <CompactMenuButton
             theme={theme}
-            title={label}
+            title={disabled ? `${label}需要先选择首帧` : label}
             label={selected?.label || label}
             icon={<ImageIcon className="size-3.5 shrink-0 opacity-90" />}
             value={value}
             items={items}
             menuWidth={220}
             maxMenuHeight={208}
+            disabled={disabled}
             onSelect={onChange}
         />
     );
@@ -83,6 +94,7 @@ function CompactMenuButton({
     items,
     menuWidth,
     maxMenuHeight,
+    disabled = false,
     onSelect,
 }: {
     theme: CanvasTheme;
@@ -93,6 +105,7 @@ function CompactMenuButton({
     items: CompactMenuItem[];
     menuWidth: number;
     maxMenuHeight: number;
+    disabled?: boolean;
     onSelect: (value: string) => void;
 }) {
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -204,10 +217,11 @@ function CompactMenuButton({
             <button
                 ref={triggerRef}
                 type="button"
-                className="inline-flex h-6 w-full min-w-0 items-center gap-1 rounded-[var(--dock-item-radius)] border-0 bg-transparent px-1.5 shadow-none transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-1"
+                disabled={disabled}
+                className="inline-flex h-6 w-full min-w-0 items-center gap-1 rounded-[var(--dock-item-radius)] border-0 bg-transparent px-1.5 shadow-none transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 disabled:cursor-not-allowed disabled:opacity-45"
                 style={buttonStyle}
                 title={title}
-                onClick={() => setOpen((value) => !value)}
+                onClick={() => !disabled && setOpen((value) => !value)}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >

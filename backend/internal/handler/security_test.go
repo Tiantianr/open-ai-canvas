@@ -37,6 +37,9 @@ func TestAuthorizeCustomRelayAllowsModelsAndAgentEndpoints(t *testing.T) {
 		{method: http.MethodGet, target: "https://api.example.com/v1/video/generations/task-1", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://api.x.ai/v1/videos/generations", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodGet, target: "https://api.x.ai/v1/videos/request-1", apiFormat: "openai"},
+		{method: http.MethodPost, target: "https://metaso.cn/api/minimax/v2/video_generation", apiFormat: "openai", contentType: "application/json"},
+		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation/task-1", apiFormat: "openai"},
+		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation?page_num=1&page_size=1", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://ark.cn-beijing.volces.com/api/v3/images/generations", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodPost, target: "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodGet, target: "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-1", apiFormat: "openai"},
@@ -67,6 +70,7 @@ func TestAuthorizeCustomRelayRejectsArbitraryRequestsAndCredentialQueries(t *tes
 		{method: http.MethodGet, target: "https://api.example.com/v1/models?api_key=secret", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/responses", apiFormat: "openai", contentType: "text/plain"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/account", apiFormat: "openai", contentType: "multipart/form-data; boundary=test"},
+		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation/task-1?page_num=1", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/../account/chat/completions", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/models/gemini:streamGenerateContent?alt=sse&token=secret", apiFormat: "gemini", contentType: "application/json"},
 	}
@@ -78,6 +82,34 @@ func TestAuthorizeCustomRelayRejectsArbitraryRequestsAndCredentialQueries(t *tes
 		if err := authorizeCustomRelay(test.method, target, test.apiFormat, test.contentType); err == nil {
 			t.Fatalf("authorizeCustomRelay(%s %s) should fail", test.method, test.target)
 		}
+	}
+}
+
+func TestAuthorizeCustomRelayComfyUIH3OnlyAllowsReadinessChecks(t *testing.T) {
+	for _, rawURL := range []string{"http://192.168.1.20:8188/system_stats", "http://192.168.1.20:8188/object_info/MiniMaxH3ReferenceToVideo"} {
+		target, err := url.Parse(rawURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := authorizeCustomRelayProtocol(http.MethodGet, target, "openai", "", "comfyui-h3"); err != nil {
+			t.Fatalf("readiness check %s error = %v", rawURL, err)
+		}
+	}
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/queue"},
+		{method: http.MethodPost, path: "/prompt"},
+		{method: http.MethodGet, path: "/system_stats?token=secret"},
+	} {
+		target, _ := url.Parse("http://192.168.1.20:8188" + test.path)
+		if err := authorizeCustomRelayProtocol(test.method, target, "openai", "application/json", "comfyui-h3"); err == nil {
+			t.Fatalf("authorizeCustomRelayProtocol(%s %s) error = nil", test.method, test.path)
+		}
+	}
+	if key, err := customRelayAPIKey("", true); err != nil || key != "" {
+		t.Fatalf("customRelayAPIKey(empty, true) = %q, %v", key, err)
 	}
 }
 
@@ -125,7 +157,7 @@ func TestAuthorizeSystemProxyVolcengineArkImageOnlyAllowsGenerations(t *testing.
 
 func TestAuthorizeSystemProxyBlocksBackendOnlyVideoInterfaces(t *testing.T) {
 	body := []byte(`{"model":"grok-image-video"}`)
-	for _, interfaceType := range []model.ChannelInterfaceType{model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineJiMengImage, model.ChannelInterfaceVolcengineJiMengVideo} {
+	for _, interfaceType := range []model.ChannelInterfaceType{model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceAsyncVideoGenerations, model.ChannelInterfaceMiniMaxH3, model.ChannelInterfaceComfyUIH3, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineJiMengImage, model.ChannelInterfaceVolcengineJiMengVideo} {
 		channel := &model.ModelChannel{APIFormat: "openai", ModelsJSON: `["grok-image-video"]`}
 		if err := authorizeSystemProxy(channel, interfaceType, http.MethodPost, "/video/generations", "application/json", body); err == nil {
 			t.Fatalf("authorizeSystemProxy() error = nil for backend-only interface %q", interfaceType)

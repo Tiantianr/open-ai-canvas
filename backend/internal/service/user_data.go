@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const MaxSyncedCanvasPayloadBytes = 64 << 20
+
 type AssetsSyncRequest struct {
 	Assets []json.RawMessage `json:"assets"`
 }
@@ -333,9 +335,19 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 }
 
 func validateSyncedPayload(raw json.RawMessage, label string) error {
+	if label == "画布" && len(raw) > MaxSyncedCanvasPayloadBytes {
+		return BadAuthRequest(label + "数据超过 64MB，请先清理过长的聊天历史或媒体数据")
+	}
+	if label == "画布" {
+		return validateSyncedPayloadMedia(raw, label)
+	}
 	if len(raw) > 4<<20 {
 		return BadAuthRequest(label + "数据超过 4MB，请先把媒体文件保存到资源存储")
 	}
+	return validateSyncedPayloadMedia(raw, label)
+}
+
+func validateSyncedPayloadMedia(raw json.RawMessage, label string) error {
 	var payload interface{}
 	if err := json.Unmarshal(raw, &payload); err == nil && containsInlineMediaDataURL(payload) {
 		return BadAuthRequest(label + "数据包含内嵌媒体，请先上传到资源存储")
