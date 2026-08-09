@@ -14,7 +14,42 @@ import (
 // ModelCapabilityConfig 是模型能力声明，不包含供应商字段名；协议适配器负责把统一参数映射到上游请求。
 type ModelCapabilityConfig struct {
 	Version int                    `json:"version"`
+	Image   *ImageCapabilityConfig `json:"image,omitempty"`
 	Video   *VideoCapabilityConfig `json:"video,omitempty"`
+}
+
+type ImageCapabilityConfig struct {
+	References            ImageReferenceConfig `json:"references"`
+	Size                  ImageSizeConfig      `json:"size"`
+	Quality               ImageQualityConfig   `json:"quality"`
+	TransparentBackground VideoBooleanConfig   `json:"transparentBackground"`
+	ResponseFormat        ParameterSupport     `json:"responseFormat"`
+	OutputFormat          ParameterSupport     `json:"outputFormat"`
+	MaxOutputs            int                  `json:"maxOutputs"`
+}
+
+type ImageReferenceConfig struct {
+	PromptMaxChars int   `json:"promptMaxChars"`
+	MaxImages      int   `json:"maxImages"`
+	MaxImageBytes  int64 `json:"maxImageBytes"`
+	MaskSupported  bool  `json:"maskSupported"`
+}
+
+type ImageSizeConfig struct {
+	Parameter   string   `json:"parameter"`
+	Values      []string `json:"values"`
+	Default     string   `json:"default"`
+	AllowCustom bool     `json:"allowCustom"`
+}
+
+type ImageQualityConfig struct {
+	Supported bool     `json:"supported"`
+	Values    []string `json:"values"`
+	Default   string   `json:"default"`
+}
+
+type ParameterSupport struct {
+	Supported bool `json:"supported"`
 }
 
 type VideoCapabilityConfig struct {
@@ -57,6 +92,58 @@ type VideoBooleanConfig struct {
 }
 
 func DefaultModelCapabilityConfig(protocol string) *ModelCapabilityConfig {
+	return DefaultModelCapabilityConfigForModel(protocol, "")
+}
+
+func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapabilityConfig {
+	image := &ImageCapabilityConfig{
+		References:            ImageReferenceConfig{PromptMaxChars: 32000, MaxImages: 16, MaxImageBytes: 30 * 1024 * 1024, MaskSupported: true},
+		Size:                  ImageSizeConfig{Parameter: "size", Values: []string{"1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "21:9", "9:16", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840"}, Default: "1:1", AllowCustom: true},
+		Quality:               ImageQualityConfig{Supported: true, Values: []string{"auto", "low", "medium", "high"}, Default: "auto"},
+		TransparentBackground: VideoBooleanConfig{Supported: true, Default: false},
+		ResponseFormat:        ParameterSupport{Supported: true},
+		OutputFormat:          ParameterSupport{Supported: true},
+		MaxOutputs:            15,
+	}
+	switch model.ChannelInterfaceType(protocol) {
+	case model.ChannelInterfaceGrokImage:
+		image.References.MaxImages = 1
+		image.References.MaskSupported = false
+		// grok2api / xAI Imagine：size→aspect_ratio，quality→resolution(1k/2k)。
+		image.Size = ImageSizeConfig{Parameter: "aspect_ratio", Values: []string{"1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2"}, Default: "1:1", AllowCustom: false}
+		image.Quality = ImageQualityConfig{Supported: true, Values: []string{"1k", "2k"}, Default: "2k"}
+		image.TransparentBackground = VideoBooleanConfig{Supported: false, Default: false}
+		image.ResponseFormat = ParameterSupport{Supported: true}
+		image.OutputFormat = ParameterSupport{Supported: false}
+		image.MaxOutputs = 1
+	case model.ChannelInterfaceVolcengineArkImage:
+		image.References.MaskSupported = false
+		image.Quality.Supported = false
+		image.TransparentBackground.Supported = false
+		image.ResponseFormat.Supported = false
+		image.OutputFormat.Supported = false
+	case model.ChannelInterfaceVolcengineJiMengImage:
+		image.References.MaxImages = 14
+		image.References.MaskSupported = false
+		image.Quality.Supported = false
+		image.TransparentBackground.Supported = false
+		image.ResponseFormat.Supported = false
+		image.OutputFormat.Supported = false
+	}
+	if model.ChannelInterfaceType(protocol) != model.ChannelInterfaceGrokImage && strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "grok-imagine-image") {
+		image.References.MaxImages = 0
+		image.References.MaskSupported = false
+		image.Size = ImageSizeConfig{Parameter: "aspect_ratio", Values: []string{"1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2"}, Default: "1:1", AllowCustom: false}
+		image.Quality = ImageQualityConfig{Supported: true, Values: []string{"1k", "2k"}, Default: "2k"}
+		image.TransparentBackground = VideoBooleanConfig{Supported: false, Default: false}
+		image.ResponseFormat = ParameterSupport{Supported: true}
+		image.OutputFormat = ParameterSupport{Supported: false}
+		image.MaxOutputs = 1
+	}
+	return image
+}
+
+func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *ModelCapabilityConfig {
 	video := &VideoCapabilityConfig{
 		References:        VideoReferenceConfig{PromptMaxChars: 1000, MaxImages: 9, MaxImageBytes: 30 * 1024 * 1024, MaxVideos: 0, MaxVideoBytes: 0, MaxVideoDuration: 0, MaxAudios: 0, MaxAudioBytes: 0, MaxAudioDuration: 0},
 		Duration:          VideoDurationConfig{Selection: "range", Min: 1, Max: 15, Step: 1, Default: 6},
@@ -111,7 +198,7 @@ func DefaultModelCapabilityConfig(protocol string) *ModelCapabilityConfig {
 	case model.ChannelInterfaceNewAPIVideo, model.ChannelInterfaceXAIVideo:
 		video.GenerateAudio = VideoBooleanConfig{Supported: false, Default: false}
 	}
-	return &ModelCapabilityConfig{Version: 1, Video: video}
+	return &ModelCapabilityConfig{Version: 1, Image: DefaultImageCapabilityConfig(protocol, modelName), Video: video}
 }
 
 func DecodeModelCapabilityConfig(raw string) (*ModelCapabilityConfig, error) {
@@ -138,9 +225,19 @@ func decodeModelCapabilityConfigWithProtocolDefault(raw string, protocol string)
 	}
 }
 
-func NormalizeModelCapabilityConfig(capability string, protocol string, input *ModelCapabilityConfig) (*ModelCapabilityConfig, error) {
-	if capability != "video" {
+func NormalizeModelCapabilityConfig(capability string, _ string, input *ModelCapabilityConfig) (*ModelCapabilityConfig, error) {
+	if capability != "image" && capability != "video" {
 		return nil, nil
+	}
+	if capability == "image" {
+		if input == nil || input.Image == nil {
+			return nil, BadAuthRequest("请配置图片模型能力参数")
+		}
+		value := &ModelCapabilityConfig{Version: 1, Image: input.Image}
+		if err := validateImageCapabilityConfig(value.Image); err != nil {
+			return nil, err
+		}
+		return value, nil
 	}
 	if input == nil || input.Video == nil {
 		return nil, BadAuthRequest("请配置视频模型能力参数")
@@ -150,6 +247,45 @@ func NormalizeModelCapabilityConfig(capability string, protocol string, input *M
 		return nil, err
 	}
 	return value, nil
+}
+
+func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
+	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
+		return BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	}
+	if value.References.MaxImages < 0 || value.References.MaxImages > 100 || value.References.MaxImageBytes < 0 {
+		return BadAuthRequest("图片引用限制无效")
+	}
+	if value.MaxOutputs < 1 || value.MaxOutputs > 100 {
+		return BadAuthRequest("单次图片数量必须在 1-100 之间")
+	}
+	switch value.Size.Parameter {
+	case "none":
+		value.Size.Values = []string{}
+		value.Size.Default = "auto"
+		value.Size.AllowCustom = false
+	case "size", "aspect_ratio":
+		if strings.TrimSpace(value.Size.Default) == "" {
+			return BadAuthRequest("请配置默认图片尺寸或比例")
+		}
+		if !value.Size.AllowCustom && !containsCapabilityString(value.Size.Values, value.Size.Default) {
+			return BadAuthRequest("默认图片尺寸必须属于支持值")
+		}
+	default:
+		return BadAuthRequest("尺寸参数仅支持不发送、size 或 aspect_ratio")
+	}
+	if value.Quality.Supported {
+		if len(value.Quality.Values) == 0 || strings.TrimSpace(value.Quality.Default) == "" || !containsCapabilityString(value.Quality.Values, value.Quality.Default) {
+			return BadAuthRequest("请配置图片质量支持值和默认值")
+		}
+	} else {
+		value.Quality.Values = []string{}
+		value.Quality.Default = "auto"
+	}
+	if !value.TransparentBackground.Supported {
+		value.TransparentBackground.Default = false
+	}
+	return nil
 }
 
 func validateVideoCapabilityConfig(value *VideoCapabilityConfig) error {
@@ -211,7 +347,7 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 		return BadAuthRequest("任务输入格式无效")
 	}
 	var taskInput canvasGenerationInput
-	if err := json.Unmarshal(encoded, &taskInput); err != nil || taskInput.Mode != "video" {
+	if err := json.Unmarshal(encoded, &taskInput); err != nil || (taskInput.Mode != "image" && taskInput.Mode != "video") {
 		return nil
 	}
 	channelID := strings.TrimSpace(taskInput.Config.ChannelID)
@@ -219,6 +355,13 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 		channelID = systemChannelIDFromBaseURL(taskInput.Config.BaseURL)
 	}
 	if channelID == "" {
+		if taskInput.Mode == "image" {
+			profile := DefaultImageCapabilityConfig(taskInput.Config.InterfaceType, taskInput.Config.Model)
+			if taskInput.Config.CapabilityConfig != nil && taskInput.Config.CapabilityConfig.Image != nil {
+				profile = taskInput.Config.CapabilityConfig.Image
+			}
+			return validateImageTask(profile, taskInput)
+		}
 		if taskInput.Config.CapabilityConfig == nil || taskInput.Config.CapabilityConfig.Video == nil {
 			return nil
 		}
@@ -228,7 +371,21 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 	if err != nil {
 		return BadAuthRequest("当前系统渠道模型未配置或已停用")
 	}
-	profile, err := decodeModelCapabilityConfigWithProtocolDefault(item.CapabilityConfigJSON, taskInput.Config.InterfaceType)
+	itemProtocol := strings.TrimSpace(string(item.Protocol))
+	if itemProtocol == "" {
+		itemProtocol = taskInput.Config.InterfaceType
+	}
+	profile, err := decodeModelCapabilityConfigWithProtocolDefault(item.CapabilityConfigJSON, itemProtocol)
+	if taskInput.Mode == "image" {
+		if err != nil {
+			return BadAuthRequest("当前图片模型能力参数无效")
+		}
+		imageProfile := DefaultImageCapabilityConfig(itemProtocol, item.ModelKey)
+		if profile != nil && profile.Image != nil {
+			imageProfile = profile.Image
+		}
+		return validateImageTask(imageProfile, taskInput)
+	}
 	if err != nil || profile == nil || profile.Video == nil {
 		return BadAuthRequest("当前视频模型尚未配置能力参数")
 	}
@@ -307,6 +464,37 @@ func comfyUIH3Resolution(value string) string {
 	default:
 		return value
 	}
+}
+
+func validateImageTask(profile *ImageCapabilityConfig, input canvasGenerationInput) error {
+	if profile == nil {
+		return nil
+	}
+	if utf8.RuneCountInString(input.Prompt) > profile.References.PromptMaxChars {
+		return BadAuthRequest(fmt.Sprintf("提示词超过当前模型限制（最多 %d 字）", profile.References.PromptMaxChars))
+	}
+	if len(input.ReferenceImages) > profile.References.MaxImages {
+		return BadAuthRequest(fmt.Sprintf("当前图片模型最多支持 %d 张参考图", profile.References.MaxImages))
+	}
+	for _, media := range input.ReferenceImages {
+		if profile.References.MaxImageBytes > 0 && media.Bytes > profile.References.MaxImageBytes {
+			return BadAuthRequest("参考图片文件超过当前模型大小限制")
+		}
+	}
+	if input.Mask != nil && !profile.References.MaskSupported {
+		return BadAuthRequest("当前图片模型不支持蒙版编辑")
+	}
+	if profile.Size.Parameter != "none" && !profile.Size.AllowCustom && strings.TrimSpace(input.Config.Size) != "" && !containsCapabilityString(profile.Size.Values, input.Config.Size) {
+		return BadAuthRequest("图片尺寸不在当前模型支持范围内")
+	}
+	if profile.Quality.Supported && strings.TrimSpace(input.Config.Quality) != "" && !containsCapabilityString(profile.Quality.Values, input.Config.Quality) {
+		return BadAuthRequest("图片质量不在当前模型支持范围内")
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(input.Config.Count))
+	if err == nil && count > profile.MaxOutputs {
+		return BadAuthRequest(fmt.Sprintf("当前图片模型单次最多生成 %d 张", profile.MaxOutputs))
+	}
+	return nil
 }
 
 func videoDurationAllowed(value VideoDurationConfig, seconds int) bool {

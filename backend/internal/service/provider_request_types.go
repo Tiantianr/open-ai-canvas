@@ -52,6 +52,22 @@ type xaiVideoImage struct {
 	URL string `json:"url"`
 }
 
+type grokImageRequest struct {
+	Model          string          `json:"model"`
+	Prompt         string          `json:"prompt"`
+	Image          *grokImageInput `json:"image,omitempty"`
+	N              int             `json:"n"`
+	ResponseFormat string          `json:"response_format"`
+	Size           string          `json:"size,omitempty"`
+	AspectRatio    string          `json:"aspect_ratio,omitempty"`
+	// Resolution 对应 xAI / grok2api 的 resolution（常见 1k / 2k）。
+	Resolution string `json:"resolution,omitempty"`
+}
+
+type grokImageInput struct {
+	URL string `json:"url"`
+}
+
 type geminiVeoRequest struct {
 	Instances  []geminiVeoInstance `json:"instances"`
 	Parameters geminiVeoParameters `json:"parameters"`

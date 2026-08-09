@@ -7,12 +7,13 @@ import { Link } from "react-router";
 
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resource-mention-textarea";
+import { VoiceRecordingButton } from "@/components/conversation/voice-recording-button";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 import { createClientId } from "@/lib/client-id";
 import { generationErrorMessage } from "@/lib/generation-error";
 import { VIDEO_RESOLUTION_OPTIONS } from "@/lib/video-generation-options";
-import { modelCapabilityConfigFor, normalizeVideoValue, videoDurationAllowed, videoDurationOptions, type VideoCapabilityConfig } from "@/lib/model-capabilities";
+import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationAllowed, videoDurationOptions, type ImageCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { parseBackendGenerationResult, runBackendGenerationTask, runBackendGenerationTaskBatch, type BackendGenerationResult } from "@/services/api/generation-task";
 import { requestImageQuestion } from "@/services/api/image";
 import { listAddedSkills, type Skill } from "@/services/api/skills";
@@ -60,6 +61,9 @@ const qualityOptions = [
     { value: "low", label: "低", description: "更快生成" },
     { value: "medium", label: "中", description: "均衡模式" },
     { value: "high", label: "高", description: "优先细节" },
+    // grok2api / xAI Imagine：quality 映射 resolution
+    { value: "1k", label: "1K", description: "标准清晰度" },
+    { value: "2k", label: "2K", description: "更高清晰度" },
 ];
 const resolutionOptions = VIDEO_RESOLUTION_OPTIONS.map((value) => ({ value: String(value), label: videoResolutionLabel(value) }));
 const countOptions = ["1", "2", "3", "4"];
@@ -132,11 +136,21 @@ export default function CreatePage() {
         [activeId, conversations],
     );
     const selectedModel = mode === "text" ? config.textModel : mode === "image" ? config.imageModel : config.videoModel;
+    const imageProfile = useMemo(() => modelCapabilityConfigFor(config, selectedModel).image!, [config, selectedModel]);
     const videoProfile = useMemo(() => modelCapabilityConfigFor(config, selectedModel).video!, [config, selectedModel]);
     const mentionReferences = useMemo(() => buildCreationMentionReferences(addedSkills, attachments, draftReferences), [addedSkills, attachments, draftReferences]);
     const isEmpty = !activeConversation?.messages.length;
     const pendingMediaKey = useMemo(() => pendingCreationMediaKey(conversations), [conversations]);
     const pendingTaskIds = useMemo(() => pendingCreationTaskIds(conversations), [conversations]);
+
+    useEffect(() => {
+        if (mode !== "image") return;
+        const normalized = normalizeImageValue(imageProfile, { size: ratio, quality, count });
+        setRatio(normalized.size);
+        setQuality(normalized.quality);
+        setCount(normalized.count);
+        if (attachments.length > imageProfile.references.maxImages) setAttachments((current) => current.slice(0, imageProfile.references.maxImages));
+    }, [mode, selectedModel, imageProfile]);
 
     useEffect(() => {
         if (mode !== "video") return;
@@ -240,10 +254,24 @@ export default function CreatePage() {
         }
     };
 
-    const maxReferences = mode === "video" ? videoProfile.operations.includes("image_to_video") ? videoProfile.references.maxImages : 0 : 6;
+    const maxReferences = mode === "video" ? videoProfile.operations.includes("image_to_video") ? videoProfile.references.maxImages : 0 : mode === "image" ? imageProfile.references.maxImages : 6;
+    const uploadCreationAsset = async (file: File) => {
+        if (file.type.startsWith("video/")) {
+            const uploaded = await uploadMediaFile(file, "create-upload");
+            return {
+                asset: creationVideoAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }),
+                attachment: creationAttachmentFromVideo(file, uploaded),
+            };
+        }
+        const uploaded = await uploadImage(file);
+        return {
+            asset: creationImageAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }),
+            attachment: creationAttachmentFromImage(file, uploaded),
+        };
+    };
     const addAttachments = (files: FileList | File[]) => {
-        if (mode === "video" && maxReferences === 0) {
-            toast.warning("当前模型不支持图生视频");
+        if ((mode === "image" || mode === "video") && maxReferences === 0) {
+            toast.warning(mode === "image" ? "当前图片模型不支持参考图" : "当前模型不支持图生视频");
             return;
         }
         const next = Array.from(files)
@@ -251,20 +279,28 @@ export default function CreatePage() {
             .slice(0, Math.max(0, maxReferences - attachments.length));
         if (!next.length) return;
         void Promise.allSettled(next.map(async (file) => {
-            if (file.type.startsWith("video/")) {
-                const uploaded = await uploadMediaFile(file, "create-upload");
-                addAsset(creationVideoAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }));
-                return creationAttachmentFromVideo(file, uploaded);
-            }
-            const uploaded = await uploadImage(file);
-            addAsset(creationImageAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }));
-            return creationAttachmentFromImage(file, uploaded);
+            const { asset, attachment } = await uploadCreationAsset(file);
+            addAsset(asset);
+            return attachment;
         })).then((settled) => {
             const items = settled.flatMap((entry) => entry.status === "fulfilled" ? [entry.value] : []);
             const failed = settled.filter((entry) => entry.status === "rejected");
             if (items.length) setAttachments((current) => [...current, ...items].slice(0, maxReferences));
             if (failed.length) toast.error(`${failed.length} 个参考素材上传失败，请重试`);
         });
+    };
+
+    const uploadLibraryAssets = async (files: FileList | File[]) => {
+        const next = Array.from(files).filter((file) => file.type.startsWith("image/") || (mode === "video" && file.type.startsWith("video/")));
+        if (!next.length) return [];
+        const settled = await Promise.allSettled(next.map(async (file) => {
+            const { asset } = await uploadCreationAsset(file);
+            return addAsset(asset);
+        }));
+        const assetIds = settled.flatMap((entry) => entry.status === "fulfilled" ? [entry.value] : []);
+        const failed = settled.filter((entry) => entry.status === "rejected");
+        if (failed.length) toast.error(`${failed.length} 个素材上传失败，请重试`);
+        return assetIds;
     };
 
     const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -304,6 +340,10 @@ export default function CreatePage() {
             toast.error(`提示词超过当前模型限制（最多 ${videoProfile.references.promptMaxChars} 字）`);
             return;
         }
+        if (mode === "image" && Array.from(text).length > imageProfile.references.promptMaxChars) {
+            toast.error(`提示词超过当前模型限制（最多 ${imageProfile.references.promptMaxChars} 字）`);
+            return;
+        }
         const settings = { ratio, seconds, quality, videoQuality, count };
         const references = selectedCreationReferences(text, mentionReferences);
         // 后端对图片和视频使用不同的参考字段；这里先拆分，避免媒体类型在写入任务时被误判。
@@ -312,6 +352,10 @@ export default function CreatePage() {
         const expandedPrompt = expandCreationPrompt(text, references, attachments);
         if (mode === "video" && Array.from(expandedPrompt).length > videoProfile.references.promptMaxChars) {
             toast.error(`引用展开后提示词超过当前模型限制（最多 ${videoProfile.references.promptMaxChars} 字）`);
+            return;
+        }
+        if (mode === "image" && Array.from(expandedPrompt).length > imageProfile.references.promptMaxChars) {
+            toast.error(`引用展开后提示词超过当前模型限制（最多 ${imageProfile.references.promptMaxChars} 字）`);
             return;
         }
         const referenceMetadata = creationReferenceMetadata(references);
@@ -349,7 +393,7 @@ export default function CreatePage() {
                 }));
                 await requestImageQuestion(requestConfig, history, (text) => updateAssistant(assistantMessage.id, (item) => ({ ...item, content: text })), { signal: controller.signal });
             } else if (mode === "image") {
-                const taskCount = Math.max(1, Math.min(15, Math.floor(Number(count) || 1)));
+                const taskCount = Math.max(1, Math.min(imageProfile.maxOutputs, Math.floor(Number(count) || 1)));
                 const settled = await runBackendGenerationTaskBatch({
                     mode: "image",
                     prompt: expandedPrompt,
@@ -498,6 +542,7 @@ export default function CreatePage() {
         onFileChange: handleFileChange,
         onModeChange: selectMode,
         model: selectedModel,
+        imageProfile,
         videoProfile,
         config,
         onModelChange: (value: string) => updateConfig(mode === "text" ? "textModel" : mode === "image" ? "imageModel" : "videoModel", value),
@@ -535,16 +580,18 @@ export default function CreatePage() {
             </main>
         </div>
         <CreationHistoryDrawer open={historyOpen} conversations={historyConversations} activeId={activeConversation.id} onClose={() => setHistoryOpen(false)} onSelect={selectConversation} />
-        <CreationAssetLibraryModal open={libraryOpen} assets={assets} mode={mode} selectedIds={new Set(attachments.filter((item) => item.id.startsWith("asset:")).map((item) => item.id.slice(6)))} onClose={() => setLibraryOpen(false)} onConfirm={handleLibrarySelect} onUpload={() => fileInputRef.current?.click()} />
+        <CreationAssetLibraryModal open={libraryOpen} assets={assets} mode={mode} selectedIds={new Set(attachments.filter((item) => item.id.startsWith("asset:")).map((item) => item.id.slice(6)))} onClose={() => setLibraryOpen(false)} onConfirm={handleLibrarySelect} onUpload={uploadLibraryAssets} />
     </>;
 }
 
 const creationAssetCategoryLabels: Record<string, string> = { all: "全部素材", character: "角色", environment: "场景", wardrobe: "服饰", prop: "道具", weapon: "武器", style: "画风", other: "其他" };
 
-function CreationAssetLibraryModal({ open, assets, mode, selectedIds, onClose, onConfirm, onUpload }: { open: boolean; assets: Asset[]; mode: CreationMode; selectedIds: Set<string>; onClose: () => void; onConfirm: (assets: Asset[]) => void; onUpload: () => void }) {
+function CreationAssetLibraryModal({ open, assets, mode, selectedIds, onClose, onConfirm, onUpload }: { open: boolean; assets: Asset[]; mode: CreationMode; selectedIds: Set<string>; onClose: () => void; onConfirm: (assets: Asset[]) => void; onUpload: (files: FileList | File[]) => Promise<string[]> }) {
     const [category, setCategory] = useState("all");
     const [keyword, setKeyword] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [uploading, setUploading] = useState(false);
+    const uploadInputRef = useRef<HTMLInputElement>(null);
     const mediaAssets = useMemo(() => assets.filter((asset): asset is Extract<Asset, { kind: "image" | "video" }> => asset.kind === "image" || asset.kind === "video"), [assets]);
     const categories = useMemo(() => ["all", ...Array.from(new Set(mediaAssets.map((asset) => asset.category || "other")))], [mediaAssets]);
     const visibleAssets = useMemo(() => {
@@ -567,6 +614,17 @@ function CreationAssetLibraryModal({ open, assets, mode, selectedIds, onClose, o
             return next;
         });
     };
+    const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+        if (!event.target.files || uploading) return;
+        setUploading(true);
+        try {
+            const assetIds = await onUpload(event.target.files);
+            if (assetIds.length) setSelected((current) => new Set([...current, ...assetIds]));
+        } finally {
+            event.target.value = "";
+            setUploading(false);
+        }
+    };
     const selectedAssets = mediaAssets.filter((asset) => selected.has(asset.id) && (mode === "video" || asset.kind === "image"));
     const count = category === "all" ? mediaAssets.length : mediaAssets.filter((asset) => (asset.category || "other") === category).length;
 
@@ -577,7 +635,7 @@ function CreationAssetLibraryModal({ open, assets, mode, selectedIds, onClose, o
                 <nav className="creation-library-categories" aria-label="素材分类">{categories.map((item) => <button key={item} type="button" className={category === item ? "is-active" : ""} onClick={() => setCategory(item)}><span>{creationAssetCategoryLabels[item] || "其他"}</span><em>{item === "all" ? mediaAssets.length : mediaAssets.filter((asset) => (asset.category || "other") === item).length}</em></button>)}</nav>
                 <div className="creation-library-grid-wrap"><div className="creation-library-grid">{visibleAssets.length ? visibleAssets.map((asset) => <CreationLibraryCard key={asset.id} asset={asset} selected={selected.has(asset.id)} disabled={mode !== "video" && asset.kind === "video"} onToggle={() => toggle(asset)} />) : <div className="creation-library-empty"><FolderOpen /><strong>这个分类还没有素材</strong><span>换个分类，或从底部上传一份新素材。</span></div>}</div></div>
             </div>
-            <footer className="creation-library-footer"><button type="button" className="creation-library-upload" onClick={onUpload}><Upload /><span><strong>找不到素材，手动上传</strong><small>支持图片{mode === "video" ? "和视频" : ""}，可一次选择多个文件</small></span></button><div className="creation-library-actions"><button type="button" onClick={onClose}>取消</button><button type="button" className="is-primary" disabled={!selectedAssets.length} onClick={() => onConfirm(selectedAssets)}><Check />使用已选素材{selectedAssets.length ? `（${selectedAssets.length}）` : ""}</button></div></footer>
+            <footer className="creation-library-footer"><input ref={uploadInputRef} type="file" hidden accept={mode === "video" ? "image/*,video/*" : "image/*"} multiple onChange={handleUpload} /><button type="button" className="creation-library-upload" onClick={() => uploadInputRef.current?.click()} disabled={uploading}><Upload /><span><strong>{uploading ? "正在上传素材" : "找不到素材，手动上传"}</strong><small>支持图片{mode === "video" ? "和视频" : ""}，可一次选择多个文件</small></span></button><div className="creation-library-actions"><button type="button" onClick={onClose}>取消</button><button type="button" className="is-primary" disabled={!selectedAssets.length} onClick={() => onConfirm(selectedAssets)}><Check />使用已选素材{selectedAssets.length ? `（${selectedAssets.length}）` : ""}</button></div></footer>
         </div>
     </Modal>;
 }
@@ -688,6 +746,7 @@ type ComposerProps = {
     onModeChange: (mode: CreationMode) => void;
     model: string;
     videoProfile: VideoCapabilityConfig;
+    imageProfile: ImageCapabilityConfig;
     config: ReturnType<typeof useEffectiveConfig>;
     onModelChange: (value: string) => void;
     ratio: string;
@@ -712,20 +771,28 @@ function CreationComposer(props: ComposerProps) {
             ? "描述画面、人物、场景、构图与风格"
             : "描述镜头内容、运动、光线与节奏";
     const emptyPlaceholder = "输入你的镜头、画面或故事。也可以添加参考图开始创作";
+    const imageReferencesSupported = props.imageProfile.references.maxImages > 0;
+    const referencesSupported = props.mode === "image" ? imageReferencesSupported : props.mode !== "video" || props.videoProfile.operations.includes("image_to_video");
+    const imageSettingsSupported = props.imageProfile.size.parameter !== "none" || props.imageProfile.quality.supported || props.imageProfile.maxOutputs > 1;
     return <section className={`creation-chat-composer is-${props.variant}`}>
         <div className="creation-chat-writing-surface">
             <input ref={props.fileInputRef} type="file" hidden accept={props.mode === "video" ? "image/*,video/*" : "image/*"} multiple onChange={props.onFileChange} />
-            <Tooltip title={props.mode === "video" && !props.videoProfile.operations.includes("image_to_video") ? "当前模型不支持参考媒体" : "从素材库选择参考内容"}><button type="button" className="creation-chat-reference is-paper" onClick={props.onOpenLibrary} disabled={props.busy || (props.mode === "video" && !props.videoProfile.operations.includes("image_to_video"))} aria-label="打开素材库选择参考内容"><Plus /><span>参考内容</span></button></Tooltip>
+            <Tooltip title={!referencesSupported ? "当前模型不支持参考媒体" : "从素材库选择参考内容"}><button type="button" className="creation-chat-reference is-paper" onClick={props.onOpenLibrary} disabled={props.busy || !referencesSupported} aria-label="打开素材库选择参考内容"><Plus /><span>参考内容</span></button></Tooltip>
             <div className="creation-chat-editor">
-                <CanvasResourceMentionTextarea value={props.prompt} references={props.references} maxLength={props.mode === "video" ? props.videoProfile.references.promptMaxChars : undefined} mentionMenuWidth={400} sendOnEnter={false} onChange={props.setPrompt} onSubmit={props.onSubmit} containerClassName="creation-chat-mention-container" className="creation-chat-mention-editor creation-scrollbar" style={{ color: "var(--creation-text)" }} placeholder={props.variant === "empty" ? emptyPlaceholder : placeholder} aria-label="创作提示词，可使用 @ 引用当前参考内容或技能" spellCheck disabled={props.busy} />
+                <CanvasResourceMentionTextarea value={props.prompt} references={props.references} maxLength={props.mode === "video" ? props.videoProfile.references.promptMaxChars : props.mode === "image" ? props.imageProfile.references.promptMaxChars : undefined} mentionMenuWidth={400} sendOnEnter={false} onChange={props.setPrompt} onSubmit={props.onSubmit} containerClassName="creation-chat-mention-container" className="creation-chat-mention-editor creation-scrollbar" style={{ color: "var(--creation-text)" }} placeholder={props.variant === "empty" ? emptyPlaceholder : placeholder} aria-label="创作提示词，可使用 @ 引用当前参考内容或技能" spellCheck disabled={props.busy} />
                 {props.attachments.length ? <div className="creation-chat-attachment-strip">{props.attachments.map((item) => <div key={item.id} className="creation-chat-attachment">{isVideoAttachment(item) ? <video src={item.url} poster={item.previewUrl !== item.url ? item.previewUrl : undefined} muted playsInline preload="metadata" aria-label={item.name} /> : <img src={item.previewUrl} alt={item.name} /> }<button type="button" onClick={() => props.onRemoveAttachment(item.id)} aria-label={`移除 ${item.name}`}><X /></button></div>)}</div> : null}
             </div>
         </div>
         <footer className="creation-chat-dock">
             <div className="creation-chat-controls">
+                <VoiceRecordingButton
+                    disabled={props.busy}
+                    onTranscribed={(text) => props.setPrompt(props.prompt.trim() ? `${props.prompt} ${text}` : text)}
+                />
                 <ModePicker mode={props.mode} onModeChange={props.onModeChange} />
+                <Tooltip title={!referencesSupported ? "当前模型不支持参考媒体" : "从素材库选择参考内容"}><button type="button" className="creation-chat-control" onClick={props.onOpenLibrary} disabled={props.busy || !referencesSupported} aria-label="打开素材库选择参考内容"><FolderOpen /><span>素材库</span></button></Tooltip>
                 <ModelPicker config={props.config} value={props.model} onChange={props.onModelChange} capability={props.mode} className="creation-model-picker" placeholder={`选择${modeLabels[props.mode]}模型`} showSelectedPrice={false} variant="creation" />
-                {props.mode !== "text" ? <GenerationSettingsMenu {...props} /> : null}
+                {props.mode === "video" || (props.mode === "image" && imageSettingsSupported) ? <GenerationSettingsMenu {...props} /> : null}
                 {props.mode === "video" ? <DurationMenu profile={props.videoProfile} seconds={props.seconds} onChange={props.setSeconds} /> : null}
             </div>
             {props.busy ? <button type="button" className="creation-chat-submit is-stopping" onClick={props.onStop} aria-label="停止生成"><Square className="size-3.5 fill-current" /></button> : <button type="button" className="creation-chat-submit" disabled={!canSubmit} onClick={props.onSubmit} aria-label="发送"><ArrowUp className="size-4" /></button>}
@@ -749,15 +816,21 @@ function ModePicker({ mode, onModeChange }: { mode: CreationMode; onModeChange: 
 function GenerationSettingsMenu(props: ComposerProps) {
     const [open, setOpen] = useState(false);
     const [customRatioOpen, setCustomRatioOpen] = useState(!ratioOptions.some((option) => option.value === props.ratio));
-    const qualityLabel = qualityOptions.find((item) => item.value === props.quality)?.label || "自动";
-    const ratios = props.mode === "video" ? props.videoProfile.ratios : ratioOptions.map((item) => item.value);
+    const activeQualityOptions = props.imageProfile.quality.values.map((value) => qualityOptions.find((item) => item.value === value) || { value, label: value.toUpperCase(), description: "模型支持的质量/分辨率" });
+    const qualityLabel = activeQualityOptions.find((item) => item.value === props.quality)?.label || qualityOptions.find((item) => item.value === props.quality)?.label || props.quality || "自动";
+    const ratios = props.mode === "video" ? props.videoProfile.ratios : props.imageProfile.size.values.length ? props.imageProfile.size.values : ratioOptions.map((item) => item.value);
     const resolutions = props.mode === "video" ? props.videoProfile.resolutions.map((value) => ({ value: value.replace(/p$/i, ""), label: videoResolutionLabel(value) })) : resolutionOptions;
-    const summary = props.mode === "video" ? `${props.ratio} · ${videoResolutionLabel(props.videoQuality)}` : `${props.ratio} · ${qualityLabel} · ${props.count}`;
+    const imageSummary = [
+        ...(props.imageProfile.size.parameter !== "none" ? [props.ratio] : []),
+        ...(props.imageProfile.quality.supported ? [qualityLabel] : []),
+        ...(props.imageProfile.maxOutputs > 1 ? [props.count] : []),
+    ].join(" · ");
+    const summary = props.mode === "video" ? `${props.ratio} · ${videoResolutionLabel(props.videoQuality)}` : imageSummary;
     const panel = <div className="creation-parameter-menu">
-        <SettingSection title="画幅" value={props.ratio}><div className="creation-parameter-content"><div className="creation-choice-grid is-ratio">{ratios.map((value) => <button key={value} type="button" aria-pressed={value === props.ratio} className={value === props.ratio ? "is-selected" : ""} onClick={() => { props.setRatio(value); setCustomRatioOpen(false); }}><span className="creation-ratio-preview"><span style={ratioPreviewStyle(value)} /></span><span>{value}</span></button>)}</div>{props.mode !== "video" && (customRatioOpen ? <label className="creation-custom-value"><span>宽 : 高</span><input value={props.ratio} onFocus={(event) => event.currentTarget.select()} onChange={(event) => props.setRatio(event.target.value)} placeholder="1920x1080 或 2:1" aria-label="自定义画幅，支持宽x高或比例" /></label> : <button type="button" className="creation-custom-trigger" onClick={() => setCustomRatioOpen(true)}><Plus />输入自定义比例</button>)}</div></SettingSection>
+        {props.mode === "video" || props.imageProfile.size.parameter !== "none" ? <SettingSection title="画幅" value={props.ratio}><div className="creation-parameter-content"><div className="creation-choice-grid is-ratio">{ratios.map((value) => <button key={value} type="button" aria-pressed={value === props.ratio} className={value === props.ratio ? "is-selected" : ""} onClick={() => { props.setRatio(value); setCustomRatioOpen(false); }}><span className="creation-ratio-preview"><span style={ratioPreviewStyle(value)} /></span><span>{value}</span></button>)}</div>{props.mode !== "video" && props.imageProfile.size.allowCustom && (customRatioOpen ? <label className="creation-custom-value"><span>宽 : 高</span><input value={props.ratio} onFocus={(event) => event.currentTarget.select()} onChange={(event) => props.setRatio(event.target.value)} placeholder="1920x1080 或 2:1" aria-label="自定义画幅，支持宽x高或比例" /></label> : <button type="button" className="creation-custom-trigger" onClick={() => setCustomRatioOpen(true)}><Plus />输入自定义比例</button>)}</div></SettingSection> : null}
         {props.mode === "video" ? <SettingSection title="清晰度" value={videoResolutionLabel(props.videoQuality)}><div className="creation-choice-grid is-resolution">{resolutions.map((option) => <button key={option.value} type="button" aria-pressed={option.value === props.videoQuality} className={option.value === props.videoQuality ? "is-selected" : ""} onClick={() => props.setVideoQuality(option.value)}>{option.label}</button>)}</div></SettingSection> : <>
-            <SettingSection title="图片质量" value={qualityLabel}><div className="creation-choice-grid is-quality">{qualityOptions.map((option) => <button key={option.value} type="button" aria-pressed={option.value === props.quality} className={option.value === props.quality ? "is-selected" : ""} onClick={() => props.setQuality(option.value)}><span>{option.label}</span><small>{option.description}</small></button>)}</div></SettingSection>
-            <SettingSection title="生成数量" value={`${props.count} 张`}><div className="creation-parameter-content"><div className="creation-choice-grid is-count">{countOptions.map((option) => <button key={option} type="button" aria-pressed={option === props.count} className={option === props.count ? "is-selected" : ""} onClick={() => props.setCount(option)}>{option}</button>)}</div><label className="creation-custom-value"><span>自定义</span><input inputMode="numeric" pattern="[0-9]*" value={props.count} onChange={(event) => props.setCount(event.target.value)} aria-label="生成数量，范围 1 到 15" /><em>张</em></label></div></SettingSection>
+            {props.imageProfile.quality.supported ? <SettingSection title={activeQualityOptions.some((item) => item.value === "1k" || item.value === "2k") ? "分辨率" : "图片质量"} value={qualityLabel}><div className="creation-choice-grid is-quality">{activeQualityOptions.map((option) => <button key={option.value} type="button" aria-pressed={option.value === props.quality} className={option.value === props.quality ? "is-selected" : ""} onClick={() => props.setQuality(option.value)}><span>{option.label}</span><small>{option.description}</small></button>)}</div></SettingSection> : null}
+            {props.imageProfile.maxOutputs > 1 ? <SettingSection title="生成数量" value={`${props.count} 张`}><div className="creation-parameter-content"><div className="creation-choice-grid is-count">{countOptions.filter((option) => Number(option) <= props.imageProfile.maxOutputs).map((option) => <button key={option} type="button" aria-pressed={option === props.count} className={option === props.count ? "is-selected" : ""} onClick={() => props.setCount(option)}>{option}</button>)}</div><label className="creation-custom-value"><span>自定义</span><input inputMode="numeric" pattern="[0-9]*" value={props.count} onChange={(event) => props.setCount(String(Math.max(1, Math.min(props.imageProfile.maxOutputs, Number(event.target.value) || 1))))} aria-label={`生成数量，范围 1 到 ${props.imageProfile.maxOutputs}`} /><em>张</em></label></div></SettingSection> : null}
         </>}
     </div>;
     return <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottom" arrow={false} classNames={{ root: "creation-control-popover", container: "creation-control-popover-surface", content: "creation-control-popover-content" }} content={panel}>
@@ -771,11 +844,18 @@ function SettingSection({ title, value, children }: { title: string; value?: str
 
 function DurationMenu({ profile, seconds, onChange }: { profile: VideoCapabilityConfig; seconds: string; onChange: (value: string) => void }) {
     const [open, setOpen] = useState(false);
-    const value = Math.max(1, Math.floor(Number(seconds) || profile.duration.default));
-    const presets = videoDurationOptions(profile);
-    const min = profile.duration.selection === "range" ? profile.duration.min || 1 : Math.min(...presets);
-    const max = profile.duration.selection === "range" ? profile.duration.max || min : Math.max(...presets);
-    return <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottom" arrow={false} classNames={{ root: "creation-control-popover", container: "creation-control-popover-surface", content: "creation-control-popover-content" }} content={<div className="creation-duration-menu"><div className="creation-duration-heading"><span>时长</span><strong>{value} 秒</strong></div><div className="creation-duration-choices">{presets.map((item) => <button key={item} type="button" className={item === value ? "is-selected" : ""} onClick={() => onChange(String(item))}>{item}s</button>)}</div>{profile.duration.selection === "range" ? <label className="creation-custom-value is-duration"><span>自定义时长</span><span className="creation-duration-custom-field"><input type="number" min={min} max={max} step={profile.duration.step || 1} inputMode="numeric" value={seconds} onFocus={(event) => event.currentTarget.select()} onBlur={() => onChange(String(value))} onChange={(event) => onChange(event.target.value)} aria-label="自定义视频时长，单位秒" /><em>秒</em></span></label> : null}</div>}>
+    const value = Number(normalizeVideoValue(profile, { seconds }).seconds);
+    const presets = profile.duration.selection === "enum" ? videoDurationOptions(profile) : [];
+    const fallbackPreset = presets.length ? presets : [profile.duration.default];
+    const min = profile.duration.selection === "range" ? profile.duration.min || 1 : Math.min(...fallbackPreset);
+    const max = profile.duration.selection === "range" ? Math.max(min, profile.duration.max || min) : Math.max(...fallbackPreset);
+    const step = Math.max(1, profile.duration.step || 1);
+    const durationControl = profile.duration.selection === "range" ? <>
+        <input className="h-8 w-full" style={{ accentColor: "var(--creation-text)" }} type="range" min={min} max={max} step={step} value={value} aria-label="视频时长（秒）" onChange={(event) => onChange(event.target.value)} />
+        <div className="flex justify-between px-0.5 text-[var(--fs-tiny)] text-[var(--creation-muted)]"><span>{min}s</span><span>{max}s</span></div>
+        <label className="creation-custom-value is-duration"><span>自定义时长</span><span className="creation-duration-custom-field"><input type="number" min={min} max={max} step={step} inputMode="numeric" value={seconds} onFocus={(event) => event.currentTarget.select()} onBlur={() => onChange(String(value))} onChange={(event) => onChange(event.target.value)} aria-label="自定义视频时长，单位秒" /><em>秒</em></span></label>
+    </> : <div className="creation-duration-choices">{presets.map((item) => <button key={item} type="button" className={item === value ? "is-selected" : ""} onClick={() => onChange(String(item))}>{item}s</button>)}</div>;
+    return <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottom" arrow={false} classNames={{ root: "creation-control-popover", container: "creation-control-popover-surface", content: "creation-control-popover-content" }} content={<div className="creation-duration-menu"><div className="creation-duration-heading"><span>时长</span><strong>{value} 秒</strong></div>{durationControl}</div>}>
         <button type="button" className="creation-chat-control is-duration" aria-label={`视频时长：${value}秒`}><Clock3 /><span>{value}s</span><ChevronDown className={open ? "is-open" : ""} /></button>
     </Popover>;
 }

@@ -6,6 +6,7 @@ import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-p
 import { buildGenerationConfig, isGenerationCanceled, supportsVideoReferenceAudio } from "@/lib/canvas/canvas-project-generation";
 import { isGenerationTaskCapacityError } from "@/lib/canvas/canvas-generation-batch";
 import { buildPortraitTexturePrompt } from "@/lib/canvas/canvas-portrait-texture";
+import { resolveCanvasStyleExecution } from "@/lib/canvas/canvas-style-execution";
 import { expandSkillMentions } from "@/lib/canvas/canvas-skill-mentions";
 import { generationErrorMessage, generationFailureMetadata } from "@/lib/generation-error";
 import { navigateToSettings } from "@/lib/settings-navigation";
@@ -123,13 +124,16 @@ export function useCanvasGenerationExecutor({
             }
 
             let rawGenerationContext: Awaited<ReturnType<typeof hydrateNodeGenerationContext>>;
+            // 视频文本只保留输入框内容；连接的媒体仍作为结构化参考传递。
+            const promptOnly = mode === "video";
             try {
                 rawGenerationContext = await hydrateNodeGenerationContext(
-                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : generationPrompt),
+                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : generationPrompt, promptOnly),
                     projectId,
                     domainProjectId,
                     mode,
                     mode === "video" && supportsVideoReferenceAudio(generationConfig),
+                    !promptOnly,
                 );
             } catch (error) {
                 const errorDetails = generationErrorMessage(error);
@@ -142,8 +146,25 @@ export function useCanvasGenerationExecutor({
                 return;
             }
 
-            const expandedPrompt = expandSkillMentions(rawGenerationContext.prompt, addedSkills);
-            const effectivePrompt = expandedPrompt.trim();
+            const expandedPrompt = promptOnly ? rawGenerationContext.prompt : expandSkillMentions(rawGenerationContext.prompt, addedSkills);
+            let effectivePrompt = expandedPrompt.trim();
+            let styleMetadata = {};
+            if (mode === "image") {
+                try {
+                    const styleRuntime = resolveCanvasStyleExecution(nodesRef.current, sourceNode, effectivePrompt, generationConfig, mode);
+                    if (styleRuntime) {
+                        effectivePrompt = styleRuntime.prompt;
+                        styleMetadata = { styleProfileJson: styleRuntime.profileJson, styleExecutionPlan: styleRuntime.plan };
+                    }
+                } catch (error) {
+                    const errorDetails = generationErrorMessage(error);
+                    if (isPreparingEmptyImage) setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, taskStage: undefined, taskProgress: undefined, taskCreatedAt: undefined, errorDetails } } : node)));
+                    finishGenerationRequest(nodeId, controller);
+                    setRunningNodeId(null);
+                    message.error(errorDetails);
+                    return;
+                }
+            }
             const generationContext = { ...rawGenerationContext, prompt: effectivePrompt };
             if (mode === "audio" && generationContext.characterReferences.length) {
                 if (generationContext.characterReferences.length !== 1) {
@@ -190,6 +211,7 @@ export function useCanvasGenerationExecutor({
                 generationContext,
                 controller,
                 editingTextNode,
+                styleMetadata,
                 setNodes,
                 setConnections,
                 setSelectedNodeIds,
