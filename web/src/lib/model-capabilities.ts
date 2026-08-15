@@ -176,9 +176,9 @@ export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = "
             maxVideos: 0,
             maxVideoBytes: 0,
             maxVideoDurationSeconds: 0,
-            maxAudios: 0,
-            maxAudioBytes: 0,
-            maxAudioDurationSeconds: 0,
+            maxAudios: 3,
+            maxAudioBytes: 15 * 1024 * 1024,
+            maxAudioDurationSeconds: 15,
         };
         video.duration = { selection: "range", min: 5, max: 15, step: 1, default: 5 };
         video.ratios = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];

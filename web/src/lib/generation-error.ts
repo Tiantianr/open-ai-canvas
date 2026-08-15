@@ -43,6 +43,12 @@ export function isContentModerationError(value: unknown) {
     return text.toLowerCase().includes(CONTENT_MODERATION_ERROR_CODE) || text.includes("内容审核未通过");
 }
 
+export function requiresProviderTaskQuery(metadata: { taskId?: string; errorDetails?: string } | undefined) {
+    if (!metadata?.taskId) return false;
+    const error = metadata.errorDetails || "";
+    return error.includes("生成等待超时") || error.includes("提交状态不确定") || error.includes("费用状态不明确") || error.includes("费用待核对");
+}
+
 export function unchangedModeratedPrompt(metadata: { errorDetails?: string; generationErrorCode?: string; failedPromptFingerprint?: string } | undefined, prompt: string) {
     const moderationFailure = metadata?.generationErrorCode === CONTENT_MODERATION_ERROR_CODE || isContentModerationError(metadata?.errorDetails);
     if (!moderationFailure) return false;
@@ -84,9 +90,7 @@ function extractWrappedProviderMessage(raw: string) {
     const requestFailure = raw.match(/^Request failed with status code \d{3}\s*[:：-]?\s*(.+)$/is);
     const wrapped = interfaceFailure?.[1] ?? requestFailure?.[1];
     if (!wrapped) return "";
-    const message = wrapped
-        .replace(/^\d{3}(?:\s+(?:Bad Gateway|Service Unavailable|Gateway Timeout|Internal Server Error|Not Found|Unauthorized|Forbidden|Too Many Requests))?\s*[:：-]?\s*/i, "")
-        .trim();
+    const message = wrapped.replace(/^\d{3}(?:\s+(?:Bad Gateway|Service Unavailable|Gateway Timeout|Internal Server Error|Not Found|Unauthorized|Forbidden|Too Many Requests))?\s*[:：-]?\s*/i, "").trim();
     return message && !containsInfrastructureDetails(message) ? message : "";
 }
 

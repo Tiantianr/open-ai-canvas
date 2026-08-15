@@ -8,7 +8,7 @@ import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { currentSeedanceAssetId } from "@/lib/seedance-provider-assets";
-import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
+import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue } from "@/lib/model-capabilities";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -96,7 +96,6 @@ function normalizeTaskProgress(progress: number | undefined, status: GenerationT
     if (status === "succeeded") return 100;
     return undefined;
 }
-
 
 export function imageExtension(dataUrl: string) {
     return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
@@ -277,22 +276,36 @@ export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
-
 export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     const fallbackModel = mode === "image" ? defaultConfig.imageModel : mode === "video" ? defaultConfig.videoModel : mode === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
     const storedModel = node?.metadata?.model;
     const model = storedModel && configuredModelMatchesCapability(config, storedModel, mode) ? storedModel : defaultModel && configuredModelMatchesCapability(config, defaultModel, mode) ? defaultModel : fallbackModel;
     const imageProfile = mode === "image" ? modelCapabilityConfigFor(config, model).image! : undefined;
-    const normalizedImage = imageProfile ? normalizeImageValue(imageProfile, { quality: node?.metadata?.quality || config.quality || defaultConfig.quality, size: node?.metadata?.size || config.size || defaultConfig.size, transparentBackground: node?.metadata?.transparentBackground || config.transparentBackground, count: String(node?.metadata?.count || config.canvasImageCount || config.count || defaultConfig.count) }) : undefined;
+    const normalizedImage = imageProfile
+        ? normalizeImageValue(imageProfile, {
+              quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
+              size: node?.metadata?.size || config.size || defaultConfig.size,
+              transparentBackground: node?.metadata?.transparentBackground || config.transparentBackground,
+              count: String(node?.metadata?.count || config.canvasImageCount || config.count || defaultConfig.count),
+          })
+        : undefined;
+    const videoProfile = mode === "video" ? modelCapabilityConfigFor(config, model).video! : undefined;
+    const normalizedVideo = videoProfile
+        ? normalizeVideoValue(videoProfile, {
+              seconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
+              ratio: node?.metadata?.size || config.size || defaultConfig.size,
+              resolution: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
+          })
+        : undefined;
     return {
         ...config,
         model,
         quality: normalizedImage?.quality || node?.metadata?.quality || config.quality || defaultConfig.quality,
-        size: normalizedImage?.size || node?.metadata?.size || config.size || defaultConfig.size,
+        size: normalizedImage?.size || normalizedVideo?.ratio || node?.metadata?.size || config.size || defaultConfig.size,
         transparentBackground: normalizedImage?.transparentBackground || ((node?.metadata?.transparentBackground || config.transparentBackground) === "true" ? "true" : "false"),
-        videoSeconds: normalizeVideoDuration(node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds),
-        vquality: normalizeVideoResolution(node?.metadata?.vquality || config.vquality || defaultConfig.vquality),
+        videoSeconds: normalizedVideo?.seconds || normalizeVideoDuration(node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds),
+        vquality: normalizedVideo?.resolution.replace(/p$/i, "") || normalizeVideoResolution(node?.metadata?.vquality || config.vquality || defaultConfig.vquality),
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
         audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
@@ -304,15 +317,19 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
 }
 
 export function supportsVideoReferenceAudio(config: AiConfig) {
-    const interfaceType = resolveModelRequestConfig(config, config.model).interfaceType;
-    return interfaceType === "newapi-channel-1" || interfaceType === "newapi-channel-2" || isSeedanceVideoConfig(config);
+    return (modelCapabilityConfigFor(config, config.model || config.videoModel).video?.references.maxAudios || 0) > 0;
 }
 
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     const configHeight = NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
     return nodes.map((node) => {
         const mediaNode = ensureMediaNodeMinimumSize(node);
-        const resizedNode = mediaNode.type === CanvasNodeType.Config && mediaNode.height < configHeight ? { ...mediaNode, height: configHeight } : mediaNode.type === CanvasNodeType.Script && mediaNode.height < NODE_DEFAULT_SIZE[CanvasNodeType.Script].height ? { ...mediaNode, height: NODE_DEFAULT_SIZE[CanvasNodeType.Script].height } : mediaNode;
+        const resizedNode =
+            mediaNode.type === CanvasNodeType.Config && mediaNode.height < configHeight
+                ? { ...mediaNode, height: configHeight }
+                : mediaNode.type === CanvasNodeType.Script && mediaNode.height < NODE_DEFAULT_SIZE[CanvasNodeType.Script].height
+                  ? { ...mediaNode, height: NODE_DEFAULT_SIZE[CanvasNodeType.Script].height }
+                  : mediaNode;
         return resizedNode.metadata?.status === "loading" ? { ...resizedNode, metadata: { ...resizedNode.metadata, errorDetails: "正在从任务中心恢复生成状态..." } } : resizedNode;
     });
 }

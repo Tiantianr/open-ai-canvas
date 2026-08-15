@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { modelCapabilityConfigFor } from "../src/lib/model-capabilities";
+import { buildGenerationConfig, supportsVideoReferenceAudio } from "../src/lib/canvas/canvas-project-generation";
+import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/lib/model-capabilities";
 import { asyncVideoGenerationMaxReferenceImages, asyncVideoGenerationModelDuration, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeVideoSize } from "../src/lib/video-generation-options";
+import { defaultConfig, type AiConfig } from "../src/stores/use-config-store";
+import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
 describe("normalizeVideoSize", () => {
     test("将共享配置中的方形比例转换为方形尺寸", () => {
@@ -60,4 +63,50 @@ describe("MiniMax H3 options", () => {
         expect(profile.references.maxVideos).toBe(3);
         expect(profile.references.maxAudios).toBe(3);
     });
+});
+
+test("视频提交按所选模型能力修正旧节点分辨率", () => {
+    const modelName = "MiniMax-H3-R2V-PDD-4Step";
+    const selectedModel = `local-h3::${modelName}`;
+    const capability = defaultModelCapabilityConfig("comfyui-h3", modelName);
+    capability.video = {
+        ...capability.video!,
+        duration: { selection: "enum", values: [5, 7, 10, 15], default: 5 },
+        ratios: ["16:9", "9:16"],
+        defaultRatio: "16:9",
+        resolutions: ["480p"],
+        defaultResolution: "480p",
+    };
+    const config: AiConfig = {
+        ...defaultConfig,
+        channels: [
+            {
+                id: "local-h3",
+                name: "Local H3",
+                baseUrl: "http://localhost",
+                apiKey: "",
+                apiFormat: "openai",
+                interfaceType: "comfyui-h3",
+                models: [modelName],
+                modelCosts: [{ model: modelName, capability: "video", protocol: "comfyui-h3", billingMode: "fixed_request", unitPriceMicrocredits: 0, capabilityConfig: capability }],
+            },
+        ],
+        models: [selectedModel],
+        videoModels: [selectedModel],
+        model: selectedModel,
+        videoModel: selectedModel,
+    };
+    const node: CanvasNodeData = {
+        id: "pdd-video",
+        type: CanvasNodeType.Video,
+        title: "PDD video",
+        position: { x: 0, y: 0 },
+        width: 640,
+        height: 360,
+        metadata: { model: selectedModel, seconds: "10", size: "16:9", vquality: "720" },
+    };
+
+    expect(buildGenerationConfig(config, node, "video")).toMatchObject({ model: selectedModel, videoSeconds: "10", size: "16:9", vquality: "480" });
+    expect(capability.video?.references).toMatchObject({ maxAudios: 3, maxAudioBytes: 15 * 1024 * 1024, maxAudioDurationSeconds: 15 });
+    expect(supportsVideoReferenceAudio(config)).toBe(true);
 });

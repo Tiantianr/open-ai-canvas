@@ -159,6 +159,23 @@ func TestMiniMaxH3BodyValidatesModesAndLimits(t *testing.T) {
 		t.Fatalf("audio-only error = %v", err)
 	}
 
+	for name, audios := range map[string][]providerMedia{
+		"too short":      {{URL: "https://example.com/short.mp3", DurationMs: 1000}},
+		"total too long": {{URL: "https://example.com/one.mp3", DurationMs: 8000}, {URL: "https://example.com/two.mp3", DurationMs: 8000}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := miniMaxH3Body(canvasGenerationInput{
+				Prompt:          "match the supplied voice",
+				Config:          providerConfig{Model: "MiniMax-H3", VideoSeconds: "5"},
+				ReferenceImages: []providerMedia{{URL: "https://example.com/reference.png"}},
+				ReferenceAudios: audios,
+			})
+			if err == nil {
+				t.Fatal("invalid reference audio was accepted")
+			}
+		})
+	}
+
 	if got, want := miniMaxH3URL("https://metaso.cn/api/minimax/v2/video_generation", "/query/video_generation/task-1"), "https://metaso.cn/api/minimax/v2/query/video_generation/task-1"; got != want {
 		t.Fatalf("miniMaxH3URL() = %q, want %q", got, want)
 	}

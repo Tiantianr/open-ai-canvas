@@ -1061,7 +1061,7 @@ func taskExecutionTimeoutWithPolicy(taskType string, policy RuntimeTaskPolicy) t
 
 func taskTimeoutMessage(taskType string) string {
 	if strings.HasPrefix(taskType, "canvas_video") || strings.HasPrefix(taskType, "video_") {
-		return "视频生成等待超时，请稍后到任务中心查看或重试。"
+		return "视频生成等待超时，请到任务中心查询原上游任务；确认无结果前请勿重试。"
 	}
 	if strings.HasPrefix(taskType, "canvas_image") {
 		return "图片生成等待超时，请稍后重试。"

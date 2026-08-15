@@ -169,7 +169,7 @@ func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *Mo
 		video.Resolutions = []string{"768p", "2k"}
 		video.DefaultResolution = "768p"
 	case model.ChannelInterfaceComfyUIH3:
-		video.References = VideoReferenceConfig{PromptMaxChars: comfyUIH3MaxPromptRunes, MaxImages: comfyUIH3MaxImages, MaxImageBytes: comfyUIH3MaxImageBytes, MaxVideos: 0, MaxVideoBytes: 0, MaxAudios: 0, MaxAudioBytes: 0}
+		video.References = VideoReferenceConfig{PromptMaxChars: comfyUIH3MaxPromptRunes, MaxImages: comfyUIH3MaxImages, MaxImageBytes: comfyUIH3MaxImageBytes, MaxVideos: 0, MaxVideoBytes: 0, MaxAudios: comfyUIH3MaxAudios, MaxAudioBytes: comfyUIH3MaxAudioBytes, MaxAudioDuration: 15}
 		video.Duration = VideoDurationConfig{Selection: "range", Min: 5, Max: 15, Step: 1, Default: 5}
 		video.Ratios = []string{"adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}
 		video.DefaultRatio = "16:9"

@@ -140,7 +140,8 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     }
 
     nextPrompt += normalizedPrompt.slice(lastIndex);
-    if (textBlocks.length && !promptOnly) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
+    // promptOnly 只屏蔽隐式上游文本；显式节点引用属于用户输入的提示词。
+    if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
     // 首尾帧是结构化生成参数，不受提示词中的 @ 引用筛选影响。
     const selectedNodeIds = new Set(selectedInputs.map((input) => input.nodeId));
     videoFrameNodeIds.forEach((nodeId) => {

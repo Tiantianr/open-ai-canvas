@@ -73,7 +73,7 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
             }
             if (protocol === "comfyui-h3") {
                 const modelName = modelOptionName(model).toLowerCase();
-                if (modelName !== "minimax-h3" && modelName !== "minimax-h3-r2v") throw new Error("ComfyUI H3 协议仅支持模型 MiniMax-H3-R2V");
+                if (modelName !== "minimax-h3" && modelName !== "minimax-h3-r2v" && modelName !== "minimax-h3-r2v-pdd-4step") throw new Error("ComfyUI H3 协议仅支持 MiniMax-H3-R2V 或 MiniMax-H3-R2V-PDD-4Step");
                 await testComfyUIH3Connection(config);
                 return "ComfyUI H3 节点验证正常，未创建视频任务";
             }

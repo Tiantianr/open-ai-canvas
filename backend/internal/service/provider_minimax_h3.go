@@ -28,6 +28,8 @@ const (
 	miniMaxH3MaxVideoBytes   int64 = 50 << 20
 	miniMaxH3MaxAudioBytes   int64 = 15 << 20
 	miniMaxH3MaxBodyBytes          = 64 << 20
+	miniMaxH3MinReferenceMs  int64 = 1800
+	miniMaxH3MaxReferenceMs  int64 = 15000
 )
 
 type miniMaxH3TaskFailure struct {
@@ -209,6 +211,26 @@ func validateMiniMaxH3References(input canvasGenerationInput) error {
 	}
 	if len(input.ReferenceAudios) > 0 && len(input.ReferenceImages) == 0 && len(input.ReferenceVideos) == 0 {
 		return errors.New("MiniMax H3 的参考音频需要同时连接至少一张参考图或一个参考视频")
+	}
+	var totalVideoMs int64
+	for i, video := range input.ReferenceVideos {
+		if video.DurationMs > 0 && video.DurationMs < miniMaxH3MinReferenceMs {
+			return fmt.Errorf("MiniMax H3 第 %d 个参考视频至少需要约 2 秒", i+1)
+		}
+		totalVideoMs += video.DurationMs
+	}
+	if totalVideoMs > miniMaxH3MaxReferenceMs {
+		return errors.New("MiniMax H3 参考视频总时长不能超过 15 秒")
+	}
+	var totalAudioMs int64
+	for i, audio := range input.ReferenceAudios {
+		if audio.DurationMs > 0 && audio.DurationMs < miniMaxH3MinReferenceMs {
+			return fmt.Errorf("MiniMax H3 第 %d 个参考音频至少需要约 2 秒", i+1)
+		}
+		totalAudioMs += audio.DurationMs
+	}
+	if totalAudioMs > miniMaxH3MaxReferenceMs {
+		return errors.New("MiniMax H3 参考音频总时长不能超过 15 秒")
 	}
 	return nil
 }

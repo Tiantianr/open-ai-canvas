@@ -260,7 +260,7 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 			return &AdminChannelModelTestResult{DurationMs: time.Since(startedAt).Milliseconds()}, nil
 		}
 		if protocol == model.ChannelInterfaceComfyUIH3 {
-			config := providerConfig{BaseURL: channel.BaseURL, APIKey: channel.APIKey, Headers: headers}
+			config := providerConfig{BaseURL: channel.BaseURL, APIKey: channel.APIKey, Headers: headers, Model: modelKey}
 			if err := testComfyUIH3Connection(modelCtx, config); err != nil {
 				return nil, err
 			}
@@ -375,7 +375,7 @@ func normalizeChannelModelContract(channel *model.ModelChannel, req ChannelModel
 		return "", "", "", BadAuthRequest("MiniMax H3 协议当前仅支持模型 MiniMax-H3")
 	}
 	if protocol == model.ChannelInterfaceComfyUIH3 && !isComfyUIH3Model(modelKey) {
-		return "", "", "", BadAuthRequest("ComfyUI H3 协议当前仅支持模型 MiniMax-H3-R2V")
+		return "", "", "", BadAuthRequest("ComfyUI H3 协议当前仅支持模型 MiniMax-H3-R2V 或 MiniMax-H3-R2V-PDD-4Step")
 	}
 	return modelKey, capability, protocol, nil
 }
