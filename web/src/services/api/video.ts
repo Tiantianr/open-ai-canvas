@@ -36,7 +36,7 @@ type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: strin
 type RequestOptions = { signal?: AbortSignal };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "video-generations" | "async-video-generations" | "minimax-h3" | "gemini-veo"; model: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "video-generations" | "async-video-generations" | "minimax-h3" | "gemini-veo" | "novita"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
@@ -94,6 +94,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
+    assertVideoCapability(modelCapabilityConfigFor(config, selectedModel).video!, references, videoReferences, audioReferences, config.videoSeconds);
     if (requestConfig.interfaceType === "comfyui-h3") throw new Error("ComfyUI H3 必须通过 Canvas 后台任务提交，避免浏览器重复提交本地工作流");
     if (requestConfig.interfaceType === "minimax-h3") {
         return createMiniMaxH3Task(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
@@ -101,12 +102,14 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (requestConfig.interfaceType === "async-video-generations") {
         return createAsyncVideoGenerationsTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    assertVideoCapability(modelCapabilityConfigFor(config, selectedModel).video!, prompt, references, videoReferences, audioReferences, config.videoSeconds);
     if (requestConfig.interfaceType === "newapi-channel-2") {
         return createVideoGenerationsTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (requestConfig.interfaceType === "gemini-veo") {
         return createGeminiVeoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
+    if (requestConfig.interfaceType === "novita-video") {
+        return createNovitaVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (requestConfig.interfaceType === "volcengine-ark-video") {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
@@ -120,8 +123,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
 }
 
-function assertVideoCapability(profile: NonNullable<ReturnType<typeof modelCapabilityConfigFor>["video"]>, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], seconds: string) {
-    if (Array.from(prompt).length > profile.references.promptMaxChars) throw new Error(`提示词超过当前模型限制（最多 ${profile.references.promptMaxChars} 字）`);
+function assertVideoCapability(profile: NonNullable<ReturnType<typeof modelCapabilityConfigFor>["video"]>, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], seconds: string) {
     if (references.length > profile.references.maxImages || videoReferences.length > profile.references.maxVideos || audioReferences.length > profile.references.maxAudios) throw new Error("参考素材数量超过当前模型限制");
     if (!videoDurationAllowed(profile, Number(seconds))) throw new Error("视频时长不在当前模型支持范围内");
     if (profile.references.maxImageBytes > 0 && references.some((image) => (image.bytes || 0) > profile.references.maxImageBytes)) throw new Error("参考图片文件超过当前模型大小限制");
@@ -143,6 +145,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     if (task.provider === "seedance") return pollSeedanceTask(requestConfig, task, options);
     if (task.provider === "video-generations") return pollVideoGenerationsTask(requestConfig, task, options);
     if (task.provider === "gemini-veo") return pollGeminiVeoTask(requestConfig, task, options);
+    if (task.provider === "novita") return pollNovitaVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
@@ -283,6 +286,7 @@ export async function testComfyUIH3Connection(config: AiConfig) {
 
 async function createVideoGenerationsTask(config: ResolvedAiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
     if (references.length > 9 || videoReferences.length > 3 || audioReferences.length > 3) throw new Error("NewAPI Video Generations 最多支持 9 张参考图、3 个参考视频和 3 个参考音频");
+    if (audioReferences.length > 0 && videoReferences.length === 0) throw new Error("NewAPI Video Generations 的参考音频必须同时提供至少 1 个参考视频；纯音频生视频请切换到支持该模式的渠道");
     const [imageUrls, videoUrls, audioUrls] = await Promise.all([
         Promise.all(references.map((item) => resolveVideoGenerationsUrl(item.url || item.dataUrl, item.storageKey))),
         Promise.all(videoReferences.map((item) => resolveVideoGenerationsUrl(item.url, item.storageKey))),
@@ -330,7 +334,7 @@ async function pollVideoGenerationsTask(config: ResolvedAiConfig, task: VideoGen
 async function resolveVideoGenerationsUrl(value: string | undefined, storageKey?: string) {
     if (storageKey?.startsWith("resource:")) return getResourceOSSUrl(storageKey);
     if (isPublicMediaUrl(value || "")) return String(value);
-    throw new Error("NewAPI Video Generations 的参考素材需要公网 URL；请先把素材保存到 OSS");
+    throw new Error("NewAPI Video Generations 的参考素材需要公网 URL；请先把素材保存到对象存储");
 }
 
 type GeminiVeoOperation = {
@@ -397,6 +401,57 @@ function geminiVeoBaseUrl(config: ResolvedAiConfig) {
 
 function geminiVeoHeaders(config: ResolvedAiConfig, contentType?: string) {
     return { "x-goog-api-key": config.apiKey, ...(contentType ? { "Content-Type": contentType } : {}) };
+}
+
+type NovitaVideoResult = { task?: { status?: string; reason?: string }; videos?: Array<{ video_url?: string }> };
+
+async function createNovitaVideoTask(config: ResolvedAiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    if (references.length > 1 || videoReferences.length || audioReferences.length) throw new Error("Novita 视频当前只支持 1 张起始图，不支持参考视频或音频");
+    const payload: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt: prompt.trim(),
+        duration: normalizeNovitaVideoDuration(config.videoSeconds),
+    };
+    if (references[0]) {
+        payload.image = isPublicMediaUrl(references[0].url || "") ? references[0].url : await imageToDataUrl(references[0]);
+    } else {
+        payload.aspect_ratio = normalizeNovitaVideoRatio(config.size);
+    }
+    try {
+        const created = await channelPost<{ task_id?: string }>(config, novitaVideoUrl(config, "/video/create"), payload, options);
+        if (!created.task_id) throw new Error("Novita 视频接口没有返回任务 ID");
+        return { id: created.task_id, provider: "novita", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Novita 视频任务创建失败"));
+    }
+}
+
+async function pollNovitaVideoTask(config: ResolvedAiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const result = await channelGet<NovitaVideoResult>(config, novitaVideoUrl(config, `/async/task-result?task_id=${encodeURIComponent(task.id)}`), options);
+        const status = result.task?.status || "";
+        if (status === "TASK_STATUS_SUCCEED") {
+            const url = result.videos?.[0]?.video_url || "";
+            if (!url) return { status: "failed", error: "Novita 视频任务已完成但没有返回视频地址" };
+            return { status: "completed", result: await videoResultFromUrl(url, options) };
+        }
+        if (status === "TASK_STATUS_FAILED") return { status: "failed", error: result.task?.reason || "视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Novita 视频任务查询失败"));
+    }
+}
+
+function novitaVideoUrl(config: ResolvedAiConfig, path: string) {
+    return `${config.baseUrl.replace(/\/+$/, "")}${path}`;
+}
+
+function normalizeNovitaVideoDuration(value: string) {
+    return normalizeSeedanceDuration(value) >= 8 ? "10" : "5";
+}
+
+function normalizeNovitaVideoRatio(value: string) {
+    return value === "16:9" || value === "9:16" || value === "1:1" ? value : "16:9";
 }
 
 async function channelPost<T>(config: ResolvedAiConfig, upstreamUrl: string, body: unknown, options?: RequestOptions) {
@@ -614,7 +669,7 @@ async function buildVolcengineArkContent(prompt: string, references: ReferenceIm
 async function resolveVolcengineArkReferenceUrl(value: string | undefined, storageKey?: string) {
     if (storageKey?.startsWith("resource:")) return getResourceOSSUrl(storageKey);
     if (isPublicMediaUrl(value || "") || String(value || "").startsWith("asset://")) return String(value);
-    throw new Error("火山方舟视频参考素材需要公网 URL 或 asset:// 素材 ID；请先将本地素材保存到 OSS");
+    throw new Error("火山方舟视频参考素材需要公网 URL 或 asset:// 素材 ID；请先将本地素材保存到对象存储");
 }
 
 async function buildSeedanceVideosPayload(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {

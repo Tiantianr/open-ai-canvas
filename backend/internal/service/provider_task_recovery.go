@@ -123,7 +123,7 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	task.LeaseOwner = owner
 	defer func() { _ = s.repo.ReleaseTaskProviderRecovery(task.ID, owner) }()
 
-	queryCtx := withProviderAnalytics(ctx, s, *task)
+	queryCtx := withProviderOutboundPolicy(withProviderAnalytics(ctx, s, *task), input.Config)
 	var result map[string]interface{}
 	var providerStatus string
 	switch config.InterfaceType {

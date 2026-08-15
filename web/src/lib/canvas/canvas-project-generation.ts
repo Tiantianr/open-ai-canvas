@@ -1,14 +1,14 @@
 import { type GenerationTask } from "@/services/api/task-center";
-import { backendProviderConfig, runBackendGenerationTask } from "@/services/api/generation-task";
-import { configuredModelMatchesCapability, defaultConfig, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { backendProviderConfig, runBackendGenerationTask, type GenerationTaskDependencies } from "@/services/api/generation-task";
+import { configuredModelMatchesCapability, defaultConfig, normalizeModelOptionValue, type AiConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
-import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { currentSeedanceAssetId } from "@/lib/seedance-provider-assets";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue } from "@/lib/model-capabilities";
+import { resolveCompatibleModel, resolveVideoOperation, type ModelRequirements } from "@/lib/model-selection";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -16,57 +16,142 @@ import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, typ
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-export async function runBackendCanvasGenerationTask({
-    projectId,
-    nodeId,
-    mode,
-    prompt,
-    config,
-    referenceImages = [],
-    referenceVideos = [],
-    referenceAudios = [],
-    mask,
-    signal,
-    metadata,
-    onTaskCreated,
-}: {
-    projectId: string;
-    nodeId: string;
-    mode: CanvasNodeGenerationMode;
-    prompt: string;
-    config: AiConfig;
-    referenceImages?: ReferenceImage[];
-    referenceVideos?: ReferenceVideo[];
-    referenceAudios?: ReferenceAudio[];
-    mask?: ReferenceImage;
-    signal?: AbortSignal;
-    metadata?: Record<string, unknown>;
-    onTaskCreated?: (task: GenerationTask) => void;
-}) {
-    return runBackendGenerationTask({
+export async function runBackendCanvasGenerationTask(
+    {
         projectId,
+        nodeId,
         mode,
         prompt,
         config,
-        referenceImages,
-        referenceVideos,
-        referenceAudios,
+        referenceImages = [],
+        referenceVideos = [],
+        referenceAudios = [],
         mask,
         signal,
-        metadata: { nodeId, ...(mode === "video" && !metadata?.videoEditOperation ? { videoEditOperation: "image_to_video" } : {}), ...metadata },
-        onTaskUpdate: onTaskCreated,
-    });
+        metadata,
+        onTaskCreated,
+        clientOperationId,
+        retryOf,
+        attemptGroupId,
+    }: {
+        projectId: string;
+        nodeId: string;
+        mode: CanvasNodeGenerationMode;
+        prompt: string;
+        config: AiConfig;
+        referenceImages?: ReferenceImage[];
+        referenceVideos?: ReferenceVideo[];
+        referenceAudios?: ReferenceAudio[];
+        mask?: ReferenceImage;
+        signal?: AbortSignal;
+        metadata?: Record<string, unknown>;
+        onTaskCreated?: (task: GenerationTask) => void;
+        clientOperationId?: string;
+        retryOf?: string;
+        attemptGroupId?: string;
+    },
+    dependencies?: GenerationTaskDependencies,
+) {
+    const normalizedReferenceImages = mode === "image" ? limitCanvasImageReferences(config, referenceImages) : referenceImages;
+    return runBackendGenerationTask(
+        {
+            projectId,
+            mode,
+            prompt,
+            config,
+            referenceImages: normalizedReferenceImages,
+            referenceVideos,
+            referenceAudios,
+            mask,
+            signal,
+            metadata: { nodeId, ...(mode === "video" && !metadata?.videoEditOperation ? { videoEditOperation: "image_to_video" } : {}), ...metadata },
+            onTaskUpdate: onTaskCreated,
+            clientOperationId,
+            retryOf,
+            attemptGroupId,
+        },
+        dependencies,
+    );
+}
+
+// Canvas references can include a scene frame plus multiple character turnarounds. Keep
+// the earliest connected scene image when a provider accepts fewer images than the graph.
+export function limitCanvasImageReferences(config: AiConfig, referenceImages: ReferenceImage[]) {
+    const maxImages = modelCapabilityConfigFor(config, config.model).image?.references.maxImages;
+    if (maxImages === undefined || maxImages < 1 || referenceImages.length <= maxImages) return referenceImages;
+    return referenceImages.slice(0, maxImages);
 }
 
 export { backendProviderConfig };
+
+const generationOperationLocks = new Map<string, Promise<unknown>>();
+
+export function runGenerationOperationOnce<T>(clientOperationId: string | undefined, operation: () => Promise<T>): Promise<T> {
+    if (!clientOperationId) return operation();
+    const existing = generationOperationLocks.get(clientOperationId) as Promise<T> | undefined;
+    if (existing) return existing;
+    const running = operation().finally(() => {
+        if (generationOperationLocks.get(clientOperationId) === running) generationOperationLocks.delete(clientOperationId);
+    });
+    generationOperationLocks.set(clientOperationId, running);
+    return running;
+}
+
+export async function runCanvasGenerationTaskToConsumer(
+    input: Parameters<typeof runBackendCanvasGenerationTask>[0],
+    dependencies: {
+        bindTask(task: GenerationTask): void;
+        consumeTask(task: GenerationTask): Promise<void>;
+        runTask?: (options: Parameters<typeof runBackendCanvasGenerationTask>[0]) => ReturnType<typeof runBackendCanvasGenerationTask>;
+    },
+) {
+    return runGenerationOperationOnce(input.clientOperationId, async () => {
+        let completedTask: GenerationTask | undefined;
+        const result = await (dependencies.runTask ?? runBackendCanvasGenerationTask)({
+            ...input,
+            onTaskCreated: (task) => {
+                input.onTaskCreated?.(task);
+                dependencies.bindTask(task);
+                if (task.status === "succeeded") completedTask = task;
+            },
+        });
+        if (!completedTask) throw new Error("生成任务缺少成功终态");
+        await dependencies.consumeTask(completedTask);
+        return result;
+    });
+}
+
+export type GenerationRetryContext = {
+    retryOf: string;
+    attemptGroupId: string;
+    clientOperationId: string;
+};
+
+export async function createGenerationRetryContext(retryOf: string, attemptGroupId = retryOf): Promise<GenerationRetryContext> {
+    const bytes = new TextEncoder().encode(`generation-retry\0${attemptGroupId}\0${retryOf}`);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return { retryOf, attemptGroupId, clientOperationId: `retry:${hex}` };
+}
+
+export function createGenerationBatchRetryContexts(taskIds: readonly string[], attemptGroupId: string) {
+    return Promise.all(taskIds.map((taskId) => createGenerationRetryContext(taskId, attemptGroupId)));
+}
 
 export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
     const progress = normalizeTaskProgress(task.progress, task.status);
     return {
         taskId: task.id,
+        taskClientOperationId: task.clientOperationId,
+        retryOf: task.retryOf,
+        attemptGroupId: task.attemptGroupId,
         taskStatus: task.status,
         taskProgress: progress,
         taskStage: task.stage,
+        taskProvider: task.provider,
+        taskErrorCode: task.errorCode,
+        taskOfficialStatus: task.officialStatus,
+        taskReceiptRecorded: task.receiptRecorded,
         taskCreatedAt: task.createdAt || task.created_at,
         taskUpdatedAt: task.updatedAt || task.updated_at,
     };
@@ -82,9 +167,16 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
         failedPromptFingerprint: undefined,
     };
     delete next.taskId;
+    delete next.taskClientOperationId;
+    delete next.retryOf;
+    delete next.attemptGroupId;
     delete next.taskStatus;
     delete next.taskProgress;
     delete next.taskStage;
+    delete next.taskProvider;
+    delete next.taskErrorCode;
+    delete next.taskOfficialStatus;
+    delete next.taskReceiptRecorded;
     delete next.taskCreatedAt;
     delete next.taskUpdatedAt;
     return next;
@@ -195,13 +287,14 @@ function resolveVideoEditOperation(
     },
 ): CanvasVideoEditOperation {
     const storedOperation = node?.metadata?.videoEditOperation;
-    // 连接关系是生成时的真实输入，不能让分镜节点残留的文生视频模式丢弃后来连接的参考图。
-    if (storedOperation === "text_to_video" && context?.referenceImages.length) return "image_to_video";
-    if (storedOperation) return storedOperation;
-    if (context?.referenceAudios.length && !context.referenceImages.length && !context.referenceVideos.length) return "audio_to_video";
-    if (context?.referenceVideos.length) return "extend";
-    if (context?.referenceImages.length) return "image_to_video";
-    return "image_to_video";
+    const input = {
+        textCount: 0,
+        imageCount: context?.referenceImages.length || 0,
+        videoCount: context?.referenceVideos.length || 0,
+        audioCount: context?.referenceAudios.length || 0,
+        characterCount: 0,
+    };
+    return resolveVideoOperation(input, storedOperation) as CanvasVideoEditOperation;
 }
 
 export function buildVideoGenerationMetadata(
@@ -276,11 +369,12 @@ export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
-export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
+export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode, requirements?: ModelRequirements): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     const fallbackModel = mode === "image" ? defaultConfig.imageModel : mode === "video" ? defaultConfig.videoModel : mode === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
-    const storedModel = node?.metadata?.model;
-    const model = storedModel && configuredModelMatchesCapability(config, storedModel, mode) ? storedModel : defaultModel && configuredModelMatchesCapability(config, defaultModel, mode) ? defaultModel : fallbackModel;
+    const storedModel = resolveCanvasGenerationModel(config, node?.metadata?.model, mode);
+    const preferredModel = storedModel || resolveCanvasGenerationModel(config, defaultModel, mode) || fallbackModel;
+    const model = resolveCompatibleModel(config, preferredModel, requirements) || preferredModel;
     const imageProfile = mode === "image" ? modelCapabilityConfigFor(config, model).image! : undefined;
     const normalizedImage = imageProfile
         ? normalizeImageValue(imageProfile, {
@@ -314,6 +408,13 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         count: normalizedImage?.count || String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
+}
+
+export function resolveCanvasGenerationModel(config: AiConfig, model: string | undefined, mode: CanvasNodeGenerationMode): string {
+    if (!model) return "";
+    const normalized = normalizeModelOptionValue(model, config.channels);
+    if (!normalized) return "";
+    return configuredModelMatchesCapability(config, normalized, mode) ? normalized : "";
 }
 
 export function supportsVideoReferenceAudio(config: AiConfig) {

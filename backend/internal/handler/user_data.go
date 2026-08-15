@@ -106,6 +106,19 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 		}
 		ok(c, gin.H{"resources": resources})
 	})
+	r.GET("/resources/storage-usage", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		usage, err := svc.AccountFileStorageUsage(user.ID)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"usage": usage})
+	})
 	r.POST("/resources", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -298,6 +311,19 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 			return
 		}
 		ok(c, gin.H{"assets": assets})
+	})
+	r.GET("/user-data/snapshot", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		snapshot, err := svc.UserDataSnapshot(user.ID)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, snapshot)
 	})
 	r.GET("/assets/:id", func(c *gin.Context) {
 		user, err := currentUser(c, svc)

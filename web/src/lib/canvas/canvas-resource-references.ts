@@ -1,6 +1,7 @@
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { Skill } from "@/services/api/skills";
+import type { Asset, AssetCategory } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text" | "skill" | "character";
@@ -17,11 +18,36 @@ export type CanvasResourceReference = {
     active: boolean;
     sourceType?: CanvasNodeType;
     skill?: Skill;
+    assetId?: string;
+    category?: AssetCategory;
 };
 
 export function canvasResourceMentionToken(reference: CanvasResourceReference) {
     if (reference.kind === "skill" && reference.skill?.skill_id) return `@[skill:${reference.skill.skill_id}]`;
+    if (reference.assetId) return `@[asset:${reference.assetId}]`;
     return `@[node:${reference.nodeId}]`;
+}
+
+export function buildAssetMentionReferences(assets: Asset[]): CanvasResourceReference[] {
+    return assets.flatMap((asset): CanvasResourceReference[] => {
+        if (asset.kind === "model") return [];
+        const kind: CanvasResourceKind = asset.kind === "entity" ? "character" : asset.kind;
+        const previewUrl = asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : asset.coverUrl;
+        const text = asset.kind === "text" ? asset.data.content : undefined;
+        return [{
+            id: `asset:${asset.id}`,
+            nodeId: "",
+            assetId: asset.id,
+            kind,
+            label: asset.title,
+            title: asset.title,
+            previewUrl,
+            storageKey: "storageKey" in asset.data ? asset.data.storageKey : undefined,
+            text,
+            active: false,
+            category: asset.category || "other",
+        }];
+    });
 }
 
 export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connections: CanvasConnection[], contextNodeId?: string | null) {
@@ -50,6 +76,22 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
     const ownInputs = getContextResourceNodes(nodeId, nodes, connections);
     if (ownInputs.length) return ownInputs;
     return [];
+}
+
+/** 收集节点自身及其上游链路中的视频节点，用于时间线片段导入定位真正的视频源。 */
+export function collectUpstreamVideoNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData[] {
+    const queue = [nodeId];
+    const visited = new Set<string>();
+    const result: CanvasNodeData[] = [];
+    while (queue.length) {
+        const currentId = queue.shift()!;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+        const node = nodes.find((item) => item.id === currentId);
+        if (node?.type === CanvasNodeType.Video && Boolean(node.metadata?.content || node.metadata?.storageKey)) result.push(node);
+        connections.filter((connection) => connection.toNodeId === currentId).forEach((connection) => queue.push(connection.fromNodeId));
+    }
+    return result;
 }
 
 function getContextResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {

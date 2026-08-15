@@ -88,7 +88,7 @@ func (s *Service) FetchAdminChannelModels(ctx context.Context, actor *model.User
 	if err := s.RequireAdmin(actor); err != nil {
 		return nil, err
 	}
-	channel, err := s.repo.AdminSystemChannel(channelID)
+	channel, err := s.adminSystemChannel(channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (s *Service) FetchAdminChannelModels(ctx context.Context, actor *model.User
 		return nil, err
 	}
 	// 使用服务端保存的渠道密钥和请求头访问上游，避免敏感配置再次经过浏览器。
-	models, err := s.FetchChannelModels(ctx, actor, ChannelModelsRequest{BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: headers})
+	models, err := s.FetchChannelModels(ctx, actor, ChannelModelsRequest{BaseURL: channel.BaseURL, AllowLocalChannel: channel.AllowLocalChannel, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: headers})
 	if err != nil {
 		return nil, err
 	}
@@ -152,14 +152,17 @@ func (s *Service) SaveAdminChannelModel(actor *model.User, channelID string, id 
 	if billingMode == "per_second" && capability != "video" {
 		return nil, BadAuthRequest("只有视频模型可以按秒计费")
 	}
-	if billingMode == "token" && capability != "text" {
-		return nil, BadAuthRequest("只有文本模型可以按 Token 计费")
+	if billingMode == "token" && !supportsTokenBilling(capability, protocol) {
+		return nil, BadAuthRequest("Token 计费仅支持文本模型和火山方舟视频协议")
 	}
 	if req.UnitPriceMicrocredits < 0 || req.InputTokenPriceMicrocredits < 0 || req.OutputTokenPriceMicrocredits < 0 || req.CachedTokenPriceMicrocredits < 0 {
 		return nil, BadAuthRequest("模型积分价格不能小于 0")
 	}
 	if billingMode == "token" && req.InputTokenPriceMicrocredits == 0 && req.OutputTokenPriceMicrocredits == 0 && req.CachedTokenPriceMicrocredits == 0 {
 		return nil, BadAuthRequest("Token 计费至少需要配置一项价格")
+	}
+	if billingMode == "token" && capability == "video" && req.OutputTokenPriceMicrocredits == 0 {
+		return nil, BadAuthRequest("火山方舟视频 Token 计费需要配置每百万视频 Token 价格")
 	}
 	const maxTokenPriceMicrocredits = int64(1_000_000) * CreditScale
 	if req.InputTokenPriceMicrocredits > maxTokenPriceMicrocredits || req.OutputTokenPriceMicrocredits > maxTokenPriceMicrocredits || req.CachedTokenPriceMicrocredits > maxTokenPriceMicrocredits {
@@ -222,11 +225,15 @@ func (s *Service) SaveAdminChannelModel(actor *model.User, channelID string, id 
 	return item, nil
 }
 
+func supportsTokenBilling(capability string, protocol model.ChannelInterfaceType) bool {
+	return capability == "text" || (capability == "video" && protocol == model.ChannelInterfaceVolcengineArkVideo)
+}
+
 func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, channelID string, req ChannelModelRequest) (*AdminChannelModelTestResult, error) {
 	if err := s.RequireAdmin(actor); err != nil {
 		return nil, err
 	}
-	channel, err := s.repo.AdminSystemChannel(channelID)
+	channel, err := s.adminSystemChannel(channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +248,9 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 	}
 	if strings.TrimSpace(channel.BaseURL) == "" || (protocol != model.ChannelInterfaceComfyUIH3 && strings.TrimSpace(channel.APIKey) == "") {
 		return nil, BadAuthRequest("请先在渠道中配置 Base URL 和 API Key")
+	}
+	if _, err := s.validateChannelOutboundURL(channel.BaseURL, channel.AllowLocalChannel, false); err != nil {
+		return nil, err
 	}
 	headers, err := ParseOutboundHeadersJSON(channel.HeadersJSON)
 	if err != nil {
@@ -288,6 +298,16 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 		videoSeconds = "5"
 		videoSecondsValue = 5
 	}
+	imageSize, imageQuality := "", ""
+	var imageProfile *ImageCapabilityConfig
+	if capability == "image" {
+		profile, normalizeErr := NormalizeModelCapabilityConfig(capability, string(protocol), req.CapabilityConfig)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		imageProfile = profile.Image
+		imageSize, imageQuality = imageTestDefaults(imageProfile)
+	}
 	input := canvasGenerationInput{
 		Mode:   capability,
 		Prompt: prompt,
@@ -296,12 +316,13 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 			APIFormat:          channel.APIFormat,
 			InterfaceType:      string(protocol),
 			BaseURL:            channel.BaseURL,
+			AllowLocalChannel:  s.effectiveAllowLocalChannel(channel.AllowLocalChannel),
 			APIKey:             channel.APIKey,
 			SecretKey:          channel.SecretKey,
 			Headers:            headers,
 			Model:              modelKey,
-			Size:               map[string]string{"image": "1024x1024", "video": "16:9"}[capability],
-			Quality:            "auto",
+			Size:               map[string]string{"image": imageSize, "video": "16:9"}[capability],
+			Quality:            imageQuality,
 			Count:              "1",
 			VideoSeconds:       videoSeconds,
 			VQuality:           "720",
@@ -314,11 +335,7 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 		Metadata: map[string]interface{}{},
 	}
 	if capability == "image" {
-		profile, normalizeErr := NormalizeModelCapabilityConfig(capability, string(protocol), req.CapabilityConfig)
-		if normalizeErr != nil {
-			return nil, normalizeErr
-		}
-		input.ImageCapability = profile.Image
+		input.ImageCapability = imageProfile
 	}
 
 	// 测试复用真实生成协议、运行时并发和熔断策略，但不创建用户任务或计费订单。
@@ -328,6 +345,7 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 		Service: s, UserID: actor.ID, ChannelID: channel.ID, Capability: capability,
 		Operation: "admin_model_test", Model: modelKey, VideoSeconds: videoSecondsValue,
 	})
+	testCtx = withProviderOutboundPolicy(testCtx, input.Config)
 	startedAt := time.Now()
 	switch capability {
 	case "text":
@@ -347,6 +365,22 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 		return nil, &AuthError{Status: status, Message: "模型测试失败：" + truncateRunes(err.Error(), 1000)}
 	}
 	return &AdminChannelModelTestResult{DurationMs: time.Since(startedAt).Milliseconds()}, nil
+}
+
+// 模型测试必须使用当前模型声明的默认参数，避免固定分辨率 SKU 被通用 1K 测试值误伤。
+func imageTestDefaults(profile *ImageCapabilityConfig) (string, string) {
+	if profile == nil {
+		return "1024x1024", "auto"
+	}
+	size := ""
+	if profile.Size.Parameter != "none" {
+		size = strings.TrimSpace(profile.Size.Default)
+	}
+	quality := ""
+	if profile.Quality.Supported {
+		quality = strings.TrimSpace(profile.Quality.Default)
+	}
+	return size, quality
 }
 
 func normalizeChannelModelContract(channel *model.ModelChannel, req ChannelModelRequest) (string, string, model.ChannelInterfaceType, error) {

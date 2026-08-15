@@ -17,6 +17,10 @@ func RegisterChannelModelRoutes(r *gin.RouterGroup, svc *service.Service) {
 			failService(c, err)
 			return
 		}
+		if err := svc.RequireFeature(service.FeatureCustomChannels); err != nil {
+			failService(c, err)
+			return
+		}
 		if !enforceRateLimit(c, "channel-models:"+user.ID, 30, time.Minute) {
 			return
 		}
@@ -26,7 +30,7 @@ func RegisterChannelModelRoutes(r *gin.RouterGroup, svc *service.Service) {
 			return
 		}
 		// handler 不接触上游响应细节，密钥校验和模型目录解析统一收敛到 service。
-		models, err := svc.FetchChannelModels(c.Request.Context(), user, input)
+		models, err := svc.FetchChannelModelCatalog(c.Request.Context(), user, input)
 		if err != nil {
 			failService(c, err)
 			return

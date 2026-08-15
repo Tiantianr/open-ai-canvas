@@ -16,7 +16,8 @@ export type ModelProtocol =
     | "xai-video"
     | "volcengine-ark-video"
     | "volcengine-jimeng-video"
-    | "gemini-veo";
+    | "gemini-veo"
+    | "novita-video";
 
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
 
@@ -52,7 +53,7 @@ export const MODEL_PROTOCOLS: ModelProtocolDefinition[] = [
     },
     { value: "async-video-generations", label: "异步 Video Generations", capability: "video", create: "POST /v1/videos/generations", poll: "GET /v1/videos/generations/{task_id}", contentType: "application/json", media: "文本或最多 12 张参考图（images，第 1 张为首图）" },
     { value: "minimax-h3", label: "MiniMax H3", capability: "video", create: "POST /v2/video_generation", poll: "GET /v2/query/video_generation/{task_id}", contentType: "application/json", media: "首/尾帧或最多 9 图、3 视频、3 音频的参考模式，二者不可混用" },
-    { value: "comfyui-h3", label: "ComfyUI H3（本地）", capability: "video", create: "POST /upload/image + /prompt", poll: "GET /history/{prompt_id}", contentType: "multipart/form-data + application/json", media: "本地静态图片 Ref2VA：1-9 张参考图，不上传视频或音频参考" },
+    { value: "comfyui-h3", label: "ComfyUI H3（本地）", capability: "video", create: "POST /upload/image + /prompt", poll: "GET /history/{prompt_id}", contentType: "multipart/form-data + application/json", media: "本地 Ref2VA：1-9 张静态参考图、最多 3 段参考音频；暂不支持参考视频" },
     { value: "xai-video", label: "xAI 官方视频", capability: "video", create: "POST /v1/videos/generations", poll: "GET /v1/videos/{request_id}", contentType: "application/json", media: "单张起始图" },
     {
         value: "volcengine-ark-video",
@@ -65,6 +66,7 @@ export const MODEL_PROTOCOLS: ModelProtocolDefinition[] = [
     },
     { value: "volcengine-jimeng-video", label: "即梦官方视频", capability: "video", create: "POST CVSync2AsyncSubmitTask", poll: "POST CVSync2AsyncGetResult", contentType: "application/json + AK/SK 签名", media: "文本或一张首帧图，模型标识填写 req_key" },
     { value: "gemini-veo", label: "Gemini Veo", capability: "video", create: "POST /v1beta/models/{model}:predictLongRunning", poll: "GET /v1beta/{operation_name}", contentType: "application/json", media: "文本与单张起始图" },
+    { value: "novita-video", label: "Novita 视频", capability: "video", create: "POST /v3/video/create", poll: "GET /v3/async/task-result?task_id={id}", contentType: "application/json", media: "文本或单张起始图" },
 ];
 
 export const MODEL_PROTOCOL_OPTIONS = protocolGroups(MODEL_PROTOCOLS.filter((item) => !item.value.startsWith("volcengine-jimeng-")));
@@ -90,6 +92,23 @@ export function modelProtocolLabel(value?: string) {
 
 export function modelProtocolCapability(value?: string) {
     return modelProtocolDefinition(value)?.capability;
+}
+
+export function modelProtocolSupportsTokenBilling(capability?: string, protocol?: string) {
+    return capability === "text" || (capability === "video" && protocol === "volcengine-ark-video");
+}
+
+export function protocolForModelCatalog(endpointTypes: string[] = []): ModelProtocol | undefined {
+    const normalized = new Set(endpointTypes.map((value) => value.trim().toLowerCase()));
+    if (normalized.has("openai-chat") || normalized.has("chat-completion") || normalized.has("chat")) return "chat-completion";
+    if (normalized.has("openai-response") || normalized.has("responses")) return "openai-response";
+    if (normalized.has("openai-image") || normalized.has("image")) return "openai-image";
+    if (normalized.has("openai-video") || normalized.has("video")) return "newapi-channel-2";
+    if (normalized.has("openai-audio") || normalized.has("audio")) return "openai-audio";
+    if (normalized.has("grok-image")) return "grok-image";
+    if (normalized.has("gemini-veo") || normalized.has("gemini-video") || normalized.has("veo")) return "gemini-veo";
+    if (normalized.has("volcengine-ark-video") || normalized.has("volcengine-ark")) return "volcengine-ark-video";
+    return undefined;
 }
 
 export function modelProtocolSummary(value?: string) {

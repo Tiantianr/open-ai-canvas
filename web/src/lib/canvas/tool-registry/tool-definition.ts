@@ -57,6 +57,7 @@ export type ToolbarHandlers = {
     onArrange: (mode: "row" | "column" | "grid" | "flow") => void;
     onCreateStoryboard: () => void;
     onCreateReferenceGroup: () => void;
+    onBatchConnect: () => void;
     onMergeVideos: () => void;
     // 节点悬停工具栏——节点操作（均接收当前节点）
     onNodeInfo: (node: CanvasNodeData) => void;
@@ -81,6 +82,8 @@ export type ToolbarHandlers = {
     onNodeAngle: (node: CanvasNodeData) => void;
     onNodeViewImage: (node: CanvasNodeData) => void;
     onNodeExtractVideoLastFrame: (node: CanvasNodeData) => void;
+    onNodeExtractAudioFromVideo: (node: CanvasNodeData) => void;
+    onNodeTrimVideoRegenerate: (node: CanvasNodeData) => void;
     onNodeSubtitles: (node: CanvasNodeData) => void;
     onNodeTimeline: (node: CanvasNodeData) => void;
     onNodeReversePrompt: (node: CanvasNodeData) => void;
@@ -105,6 +108,9 @@ export type ToolContext = {
     nodeMetadata?: CanvasNodeMetadata;
     /** 视频尾帧提取中（节点悬停工具栏用） */
     extractingVideoFrame: boolean;
+    /** 视频音频提取/片段截取进行中（节点悬停工具栏用） */
+    extractingAudio: boolean;
+    trimmingVideo: boolean;
     /** 合并视频中（多选工具栏用） */
     mergingVideos: boolean;
     /** 主工具栏面板开关状态（仅主工具栏使用） */

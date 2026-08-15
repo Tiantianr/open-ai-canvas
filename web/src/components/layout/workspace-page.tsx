@@ -2,7 +2,6 @@ import { Button, Pagination } from "antd";
 import { RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { WorkspaceSignalIcon, type WorkspaceSignalIconVariant } from "@/components/ui/aceternity/workspace-signal-icon";
 import { cn } from "@/lib/utils";
 
 export function WorkspacePage({ children, className, grid = false, fluid = false }: { children: ReactNode; className?: string; grid?: boolean; fluid?: boolean }) {
@@ -13,14 +12,13 @@ export function WorkspacePage({ children, className, grid = false, fluid = false
     );
 }
 
-export function PageHeader({ title, description, meta, actions, icon }: { title: string; description?: string; meta?: ReactNode; actions?: ReactNode; icon?: WorkspaceSignalIconVariant }) {
+export function PageHeader({ title, description, meta, actions }: { title: string; description?: string; meta?: ReactNode; actions?: ReactNode }) {
     return (
-        <header className="app-page-header flex min-h-14 flex-col gap-3 border-b border-border/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <header className="app-page-header flex min-h-14 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
-                {icon ? <WorkspaceSignalIcon variant={icon} /> : null}
                 <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-2.5">
-                        <h1 className="truncate text-[var(--fs-title)] font-semibold leading-7">{title}</h1>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                        <h1 className="app-page-header-title truncate font-semibold leading-7">{title}</h1>
                         {meta}
                     </div>
                     {description ? <p className="mt-1 text-xs leading-5 text-foreground/58">{description}</p> : null}
@@ -33,7 +31,7 @@ export function PageHeader({ title, description, meta, actions, icon }: { title:
 
 export function ListToolbar({ children, trailing, active, onReset, className }: { children: ReactNode; trailing?: ReactNode; active?: boolean; onReset?: () => void; className?: string }) {
     return (
-        <div className={cn("mt-3 flex min-h-12 flex-col gap-2 border-b border-border/75 pb-3 lg:flex-row lg:items-center lg:justify-between", className)}>
+        <div className={cn("mt-3 flex min-h-12 flex-col gap-2 pb-3 lg:flex-row lg:items-center lg:justify-between", className)}>
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">{children}</div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
                 {active && onReset ? <Button type="text" icon={<RotateCcw className="size-3.5" />} onClick={onReset}>重置</Button> : null}
@@ -44,17 +42,17 @@ export function ListToolbar({ children, trailing, active, onReset, className }: 
 }
 
 export function TableSurface({ children, className }: { children: ReactNode; className?: string }) {
-    return <div className={cn("app-table-surface mt-4 min-w-0 overflow-hidden rounded-lg border border-border bg-background", className)}>{children}</div>;
+    return <div className={cn("app-table-surface mt-4 min-w-0 overflow-hidden rounded-lg bg-surface", className)}>{children}</div>;
 }
 
 export function CollectionGrid({ children, className }: { children: ReactNode; className?: string }) {
-    return <div className={cn("mt-4 grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-[repeat(auto-fill,minmax(248px,1fr))]", className)}>{children}</div>;
+    return <div className={cn("mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(248px,1fr))]", className)}>{children}</div>;
 }
 
 export function PaginationBar({ current, pageSize, total, onChange, pageSizeOptions = [20, 50, 100] }: { current: number; pageSize: number; total: number; onChange: (page: number, pageSize: number) => void; pageSizeOptions?: number[] }) {
     if (total <= pageSize && current === 1) return null;
     return (
-        <div className="app-pagination-bar mt-4 flex min-h-10 min-w-0 items-center justify-end border-t border-border/70 px-2 py-1.5">
+        <div className="app-pagination-bar mt-4 flex min-h-10 min-w-0 items-center justify-end px-2 py-1.5">
             <Pagination
                 size="small"
                 current={current}

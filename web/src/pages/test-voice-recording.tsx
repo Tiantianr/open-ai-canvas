@@ -73,7 +73,14 @@ export default function TestVoiceRecording() {
                             <div className="flex flex-1 items-center gap-2">
                                 <VoiceRecordingButton onTranscribed={handleTranscribed} />
                             </div>
-                            <Button type="primary" icon={<Send className="size-4" />} disabled={!prompt.trim()} loading={sending} onClick={handleSubmit} style={{ background: theme.accent.primary, borderColor: theme.accent.primary }}>
+                            <Button
+                                type="primary"
+                                icon={<Send className="size-4" />}
+                                disabled={!prompt.trim()}
+                                loading={sending}
+                                onClick={handleSubmit}
+                                style={{ background: theme.accent.primary, borderColor: theme.accent.primary, color: theme.accent.onPrimary }}
+                            >
                                 发送
                             </Button>
                         </div>

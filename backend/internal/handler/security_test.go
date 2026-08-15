@@ -49,6 +49,8 @@ func TestAuthorizeCustomRelayAllowsModelsAndAgentEndpoints(t *testing.T) {
 		{method: http.MethodPost, target: "https://metaso.cn/api/minimax/v2/video_generation", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation/task-1", apiFormat: "openai"},
 		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation?page_num=1&page_size=1", apiFormat: "openai"},
+		{method: http.MethodPost, target: "https://api.novita.ai/v3/video/create", apiFormat: "openai", contentType: "application/json"},
+		{method: http.MethodGet, target: "https://api.novita.ai/v3/async/task-result?task_id=task-1", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://ark.cn-beijing.volces.com/api/v3/images/generations", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodPost, target: "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodGet, target: "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task-1", apiFormat: "openai"},
@@ -82,6 +84,8 @@ func TestAuthorizeCustomRelayRejectsArbitraryRequestsAndCredentialQueries(t *tes
 		{method: http.MethodGet, target: "https://metaso.cn/api/minimax/v2/query/video_generation/task-1?page_num=1", apiFormat: "openai"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/../account/chat/completions", apiFormat: "openai", contentType: "application/json"},
 		{method: http.MethodPost, target: "https://api.example.com/v1/models/gemini:streamGenerateContent?alt=sse&token=secret", apiFormat: "gemini", contentType: "application/json"},
+		{method: http.MethodGet, target: "https://api.novita.ai/v3/async/task-result?task_id=task-1&api_key=secret", apiFormat: "openai"},
+		{method: http.MethodGet, target: "https://api.novita.ai/v3/async/task-result", apiFormat: "openai"},
 	}
 	for _, test := range tests {
 		target, err := url.Parse(test.target)

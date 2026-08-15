@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"infinite-canvas/backend/internal/model"
 
@@ -29,6 +30,23 @@ type UserDataSummary struct {
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type UserDataSnapshot struct {
+	Assets   []json.RawMessage `json:"assets"`
+	Projects []json.RawMessage `json:"projects"`
+}
+
+func (s *Service) UserDataSnapshot(userID string) (UserDataSnapshot, error) {
+	assets, err := s.UserAssets(userID)
+	if err != nil {
+		return UserDataSnapshot{}, err
+	}
+	projects, err := s.UserCanvasProjects(userID)
+	if err != nil {
+		return UserDataSnapshot{}, err
+	}
+	return UserDataSnapshot{Assets: assets, Projects: projects}, nil
 }
 
 func (s *Service) UserAssetSummaries(userID string) ([]UserDataSummary, error) {
@@ -280,6 +298,13 @@ func assetFromJSON(userID string, raw json.RawMessage) (model.Asset, error) {
 	if id == "" {
 		id = newID()
 	}
+	if utf8.RuneCountInString(id) > model.AssetIDMaxLength {
+		return model.Asset{}, BadAuthRequest("素材 ID 不能超过 80 个字符")
+	}
+	primaryVersionID := strings.TrimSpace(payload.PrimaryVersionID)
+	if utf8.RuneCountInString(primaryVersionID) > 36 {
+		return model.Asset{}, BadAuthRequest("素材主版本 ID 不能超过 36 个字符")
+	}
 	category := model.AssetCategory(strings.TrimSpace(payload.Category))
 	if category == "" {
 		category = model.AssetCategoryOther
@@ -294,7 +319,7 @@ func assetFromJSON(userID string, raw json.RawMessage) (model.Asset, error) {
 		Kind:             strings.TrimSpace(payload.Kind),
 		Category:         category,
 		Status:           status,
-		PrimaryVersionID: strings.TrimSpace(payload.PrimaryVersionID),
+		PrimaryVersionID: primaryVersionID,
 		Title:            strings.TrimSpace(payload.Title),
 		PayloadJSON:      string(raw),
 		CreatedAt:        createdAt,

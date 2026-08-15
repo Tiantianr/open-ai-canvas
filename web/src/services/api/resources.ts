@@ -25,9 +25,10 @@ export type RemoteResource = {
 
 export type UserOSSSetting = {
     enabled: boolean;
-    provider: "aliyun";
+    provider: "aliyun" | "tencent";
     region: string;
     endpoint: string;
+    cdnBaseUrl: string;
     bucket: string;
     accessKeyId: string;
     hasAccessKeySecret: boolean;
@@ -36,8 +37,13 @@ export type UserOSSSetting = {
     updatedAt?: string;
 };
 
-export type UserOSSSettingInput = Pick<UserOSSSetting, "enabled" | "provider" | "region" | "endpoint" | "bucket" | "accessKeyId" | "pathPrefix"> & {
+export type UserOSSSettingInput = Pick<UserOSSSetting, "enabled" | "provider" | "region" | "endpoint" | "cdnBaseUrl" | "bucket" | "accessKeyId" | "pathPrefix"> & {
     accessKeySecret?: string;
+};
+
+export type AccountFileStorageUsage = {
+    usedBytes: number;
+    totalBytes: number;
 };
 
 const api = apiClient;
@@ -55,6 +61,11 @@ export function getUserOSSSetting() {
 
 export function updateUserOSSSetting(input: UserOSSSettingInput) {
     return request<{ setting: UserOSSSetting }>(api.patch("/settings/oss", input));
+}
+
+export async function getAccountFileStorageUsage() {
+    const data = await request<{ usage: AccountFileStorageUsage }>(api.get("/resources/storage-usage"));
+    return data.usage;
 }
 
 export function resourceIdFromStorageKey(storageKey?: string) {
@@ -123,10 +134,10 @@ export async function getResourceOSSUrl(storageKey?: string) {
     if (!id) throw new Error("当前媒体尚未上传到后端资源存储");
     try {
         const data = await request<{ url: string }>(api.get(`/resources/${encodeURIComponent(id)}/oss-url`));
-        if (!data.url) throw new Error("后端未返回 OSS 地址");
+        if (!data.url) throw new Error("后端未返回对象存储地址");
         return data.url;
     } catch (error) {
-        if (axios.isAxiosError<BackendEnvelope<unknown>>(error)) throw new Error(error.response?.data.msg || error.message || "获取 OSS 地址失败");
+        if (axios.isAxiosError<BackendEnvelope<unknown>>(error)) throw new Error(error.response?.data.msg || error.message || "获取对象存储地址失败");
         throw error;
     }
 }

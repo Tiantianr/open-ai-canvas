@@ -1,6 +1,6 @@
-import { Captions, Clapperboard, Download, FolderPlus, GalleryHorizontalEnd, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, Trash2, Unlock, Upload, UserRound, Video } from "lucide-react";
+import { AudioLines, Captions, Clapperboard, Download, FolderPlus, GalleryHorizontalEnd, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Unlock, Upload, UserRound, Video } from "lucide-react";
 
-import { CONTENT_MODERATION_ERROR_CODE, isContentModerationError } from "@/lib/generation-error";
+import { CONTENT_MODERATION_ERROR_CODE, isContentModerationError, requiresProviderTaskQuery } from "@/lib/generation-error";
 import { registerToolbarTools, type ToolContext, type ToolDefinition } from "@/lib/canvas/tool-registry";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -17,9 +17,11 @@ function isCharacterReference(ctx: ToolContext) { return isText(ctx) && ctx.node
 function isEditableText(ctx: ToolContext) { return isText(ctx) && !isCharacterReference(ctx); }
 function canOpenDialog(ctx: ToolContext) { return isEditableText(ctx) || isImage(ctx) || isVideo(ctx); }
 function simpleMode(ctx: ToolContext) { return ctx.workspaceMode === "simple"; }
+function isImageBatchRoot(ctx: ToolContext) { return isImage(ctx) && Boolean(ctx.nodeMetadata?.isBatchRoot && ctx.nodeMetadata.batchChildIds?.length); }
 function canRetry(ctx: ToolContext) {
     const requiresPromptChange = ctx.nodeMetadata?.generationErrorCode === CONTENT_MODERATION_ERROR_CODE || isContentModerationError(ctx.nodeMetadata?.errorDetails);
-    return ctx.nodeMetadata?.status === "error" && !requiresPromptChange;
+    const batchHasFailures = isImageBatchRoot(ctx) && (ctx.nodeMetadata?.batchFailedCount || (ctx.nodeMetadata?.status === "error" ? 1 : 0)) > 0;
+    return (ctx.nodeMetadata?.status === "error" || (batchHasFailures && ctx.nodeMetadata?.status !== "loading")) && !requiresPromptChange && !requiresProviderTaskQuery(ctx.nodeMetadata);
 }
 
 export const nodeHoverToolbarTools: ToolDefinition[] = [
@@ -52,8 +54,8 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         id: "retry",
         toolbar: "node-hover",
         category: "node-state",
-        label: "重新生成",
-        displayLabel: "重试",
+        label: (ctx) => isImageBatchRoot(ctx) ? "重试批次中的失败图片" : "重新生成",
+        displayLabel: (ctx) => isImageBatchRoot(ctx) ? "重试失败项" : "重试",
         icon: <RefreshCw className="size-3.5" />,
         defaultVisible: true,
         defaultOrder: 30,
@@ -72,6 +74,32 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
         disabled: (ctx) => ctx.extractingVideoFrame,
         run: (ctx) => ctx.handlers.onNodeExtractVideoLastFrame(ctx.node!),
+    },
+    {
+        id: "extractAudio",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: (ctx) => ctx.extractingAudio ? "正在提取声音为 MP3" : "提取声音为 MP3",
+        displayLabel: (ctx) => ctx.extractingAudio ? "提取中" : "提取音频",
+        icon: (ctx) => ctx.extractingAudio ? <LoaderCircle className="size-3.5 animate-spin" /> : <AudioLines className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 42,
+        applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
+        disabled: (ctx) => ctx.extractingAudio || ctx.trimmingVideo,
+        run: (ctx) => ctx.handlers.onNodeExtractAudioFromVideo(ctx.node!),
+    },
+    {
+        id: "trimRegenerate",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: (ctx) => ctx.trimmingVideo ? "正在截取片段" : "按段截取并重生成",
+        displayLabel: (ctx) => ctx.trimmingVideo ? "截取中" : "截取重生成",
+        icon: (ctx) => ctx.trimmingVideo ? <LoaderCircle className="size-3.5 animate-spin" /> : <Scissors className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 44,
+        applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
+        disabled: (ctx) => ctx.extractingAudio || ctx.trimmingVideo,
+        run: (ctx) => ctx.handlers.onNodeTrimVideoRegenerate(ctx.node!),
     },
     {
         id: "saveAsset",

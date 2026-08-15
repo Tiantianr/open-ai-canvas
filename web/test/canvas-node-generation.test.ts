@@ -14,7 +14,7 @@ describe("buildNodeGenerationContext", () => {
             { id: "unused-to-config", fromNodeId: "unused-text", toNodeId: "video-config" },
         ];
 
-        const context = buildNodeGenerationContext("video-config", nodes, connections, "任务说明：@[node:shot-text]", true);
+        const context = buildNodeGenerationContext("video-config", nodes, connections, "任务说明：@[node:shot-text]", [], true);
 
         expect(context.prompt).toContain("任务说明：【文本1】");
         expect(context.prompt).toContain("【文本1】\n镜头的真实正文");

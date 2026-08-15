@@ -163,7 +163,9 @@ export default function SkillsPage() {
     return (
         <>
             <WorkspacePage className="library-page skills-library-page" grid>
-                <PageHeader icon="skills" title="技能库" description="把常用的提示词、角色设定和创作方法收进自己的工具架。" meta={<span className="text-xs text-foreground/45">{total} 个技能</span>} actions={null} />
+                <div className="studio-band">
+                    <PageHeader title="技能库" description="把常用的提示词、角色设定和创作方法收进自己的工具架。" meta={<span className="text-xs text-foreground/45">{total} 个技能</span>} actions={null} />
+                </div>
 
                 <div className="mt-1 flex flex-col border-b border-border/75 xl:flex-row xl:items-end xl:justify-between">
                     <nav className="thin-scrollbar -mb-px flex min-w-0 overflow-x-auto" aria-label="技能库范围" role="tablist">
@@ -239,7 +241,7 @@ export default function SkillsPage() {
 
 function SkillCard({ skill, loading, onOpen, onAdd, onLike, onEdit, onDelete }: { skill: Skill; loading: boolean; onOpen: () => void; onAdd: () => void; onLike: () => void; onEdit: () => void; onDelete: () => void }) {
     return (
-        <article className={`library-card skill-library-card group${skill.is_added ? " is-added" : ""}`}>
+        <article className={`library-card library-card-surface skill-library-card group${skill.is_added ? " is-selected is-added" : ""}`}>
             <div className="skill-card-top">
                 <button type="button" className="skill-card-title-button" onClick={onOpen}>
                     <h3>{skill.skill_name}</h3>
@@ -277,7 +279,7 @@ function SkillCard({ skill, loading, onOpen, onAdd, onLike, onEdit, onDelete }: 
                 ? <div className="skill-card-action"><span className="skill-card-owner-flag">我创建的</span><span className="skill-card-added-count">{formatSkillCount(skill.added_count)} 人已加入</span></div>
                 : (
                     <div className="skill-card-action">
-                        <button type="button" disabled={loading} className={`skill-card-join${skill.is_added ? " is-added" : ""}`} onClick={onAdd}>
+                        <button type="button" disabled={loading} aria-pressed={skill.is_added} className={`skill-card-join${skill.is_added ? " is-added" : ""}`} onClick={onAdd}>
                             {loading ? <LoaderCircle className="size-3.5 animate-spin" /> : skill.is_added ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
                             <span>{skill.is_added ? "已加入" : "加入我的技能库"}</span>
                         </button>

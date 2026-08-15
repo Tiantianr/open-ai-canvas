@@ -22,19 +22,20 @@ import (
 )
 
 type Service struct {
-	repo            *repository.Repository
-	dataDir         string
-	cancelMu        sync.Mutex
-	registrationMu  sync.Mutex
-	emailCodeMu     sync.Mutex
-	redeemBatchMu   sync.Mutex
-	storageMu       sync.Mutex
-	characterTaskMu sync.Mutex
-	activeCancels   map[string]context.CancelFunc
-	pendingStorage  map[string]int64
-	coordinator     *runtimeCoordinator
-	runtimeErr      error
-	workerID        string
+	repo                *repository.Repository
+	dataDir             string
+	runtimeCapabilities RuntimeCapabilities
+	cancelMu            sync.Mutex
+	registrationMu      sync.Mutex
+	emailCodeMu         sync.Mutex
+	redeemBatchMu       sync.Mutex
+	storageMu           sync.Mutex
+	characterTaskMu     sync.Mutex
+	activeCancels       map[string]context.CancelFunc
+	pendingStorage      map[string]int64
+	coordinator         *runtimeCoordinator
+	runtimeErr          error
+	workerID            string
 }
 
 const taskWorkerConcurrency = 3
@@ -190,8 +191,12 @@ type agentStoryboardShot struct {
 }
 
 func New(repo *repository.Repository, dataDir string) *Service {
+	return NewWithRuntimeCapabilities(repo, dataDir, RuntimeCapabilities{})
+}
+
+func NewWithRuntimeCapabilities(repo *repository.Repository, dataDir string, capabilities RuntimeCapabilities) *Service {
 	coordinator, err := newRuntimeCoordinator(repo.Dialect())
-	return &Service{repo: repo, dataDir: dataDir, activeCancels: make(map[string]context.CancelFunc), coordinator: coordinator, runtimeErr: err, workerID: newID()}
+	return &Service{repo: repo, dataDir: dataDir, runtimeCapabilities: capabilities, activeCancels: make(map[string]context.CancelFunc), coordinator: coordinator, runtimeErr: err, workerID: newID()}
 }
 
 func (s *Service) StartWorker() {
@@ -322,6 +327,9 @@ func (s *Service) CreateTask(userID string, req CreateTaskRequest) (*model.Task,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireCustomChannelsForTaskInput(normalizedInput); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateTaskCapability(normalizedInput); err != nil {
 		return nil, err
 	}
@@ -391,6 +399,27 @@ func normalizeTaskInput(input map[string]any) (map[string]any, error) {
 		normalized["canvasSnapshot"] = compactPersistedValue(snapshot)
 	}
 	return normalized, nil
+}
+
+func (s *Service) requireCustomChannelsForTaskInput(input map[string]any) error {
+	if !taskInputUsesCustomChannel(input) {
+		return nil
+	}
+	return s.RequireFeature(FeatureCustomChannels)
+}
+
+func taskInputUsesCustomChannel(input map[string]any) bool {
+	config, ok := input["config"].(map[string]any)
+	if !ok {
+		return false
+	}
+	channelID, _ := config["channelId"].(string)
+	baseURL, _ := config["baseUrl"].(string)
+	apiKey, _ := config["apiKey"].(string)
+	if strings.TrimSpace(channelID) != "" || systemChannelIDFromBaseURL(baseURL) != "" {
+		return false
+	}
+	return strings.TrimSpace(baseURL) != "" && strings.TrimSpace(apiKey) != ""
 }
 
 func compactPersistedValue(value interface{}) interface{} {
@@ -500,6 +529,9 @@ func (s *Service) RetryTask(userID string, id string) (*model.Task, error) {
 	}
 	var billingInput map[string]any
 	if err := json.Unmarshal([]byte(decryptedInput), &billingInput); err != nil {
+		return nil, err
+	}
+	if err := s.requireCustomChannelsForTaskInput(billingInput); err != nil {
 		return nil, err
 	}
 	billingOrder, err := s.taskBillingOrder(userID, task, billingInput)
@@ -1137,6 +1169,7 @@ func (s *Service) processAgentStoryboardTask(ctx context.Context, task model.Tas
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx = withProviderOutboundPolicy(ctx, config)
 	plannerPrompt, err := s.buildAgentStoryboardPlannerPrompt(task.UserID, task.Prompt, input.Requirements, assets, input.ProjectStyle, input.Characters, 0, 0)
 	if err != nil {
 		return nil, nil, err
@@ -1148,26 +1181,17 @@ func (s *Service) processAgentStoryboardTask(ctx context.Context, task model.Tas
 	text, _ := result["text"].(string)
 	plan, err := parseAgentStoryboardPlan(text)
 	if err == nil {
+		normalizeAutomaticStoryboardDurations(&plan, 0)
 		err = validateStoryboardPlan(plan, 0, 0, input.Characters)
 	}
 	if err != nil {
-		_ = s.repo.UpdateTaskProgress(task.ID, "修复分镜结构", 55)
-		repairPrompt, promptErr := s.buildStoryboardRepairPrompt(task.UserID, err, input, text)
-		if promptErr != nil {
-			return nil, nil, promptErr
-		}
-		repaired, repairErr := runTextTask(withProviderRequestKind(ctx, "repair"), canvasGenerationInput{Mode: "text", Prompt: repairPrompt, Config: config, StreamText: true})
-		if repairErr != nil {
-			return nil, nil, fmt.Errorf("分镜结构修复失败：%w", repairErr)
-		}
-		repairedText, _ := repaired["text"].(string)
-		plan, err = parseAgentStoryboardPlan(repairedText)
-		if err == nil {
-			err = validateStoryboardPlan(plan, 0, 0, input.Characters)
-		}
+		plan, err = s.repairStoryboardPlan(ctx, task, input, config, text, err, 0, 0)
 		if err != nil {
-			return nil, nil, fmt.Errorf("分镜模型结构修复后仍不合法：%w", err)
+			return nil, nil, err
 		}
+	}
+	if complexityErr := validateStoryboardComplexity(plan); complexityErr != nil {
+		_ = s.log(task.UserID, task.ID, "warn", "分镜复杂度建议", complexityErr.Error())
 	}
 	return s.buildAgentStoryboardResult(task, plan, assets, input.ProjectStyle)
 }
@@ -1193,6 +1217,7 @@ func (s *Service) processStoryboardRowsTask(ctx context.Context, task model.Task
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx = withProviderOutboundPolicy(ctx, config)
 	plannerPrompt, err := s.buildAgentStoryboardPlannerPrompt(task.UserID, task.Prompt, input.Requirements, assets, input.ProjectStyle, input.Characters, input.ShotDuration, input.ShotCount)
 	if err != nil {
 		return nil, nil, err
@@ -1204,26 +1229,17 @@ func (s *Service) processStoryboardRowsTask(ctx context.Context, task model.Task
 	text, _ := result["text"].(string)
 	plan, err := parseAgentStoryboardPlan(text)
 	if err == nil {
+		normalizeAutomaticStoryboardDurations(&plan, input.ShotDuration)
 		err = validateStoryboardPlan(plan, input.ShotDuration, input.ShotCount, input.Characters)
 	}
 	if err != nil {
-		_ = s.repo.UpdateTaskProgress(task.ID, "修复分镜结构", 55)
-		repairPrompt, promptErr := s.buildStoryboardRepairPrompt(task.UserID, err, input, text)
-		if promptErr != nil {
-			return nil, nil, promptErr
-		}
-		repaired, repairErr := runTextTask(withProviderRequestKind(ctx, "repair"), canvasGenerationInput{Mode: "text", Prompt: repairPrompt, Config: config, StreamText: true})
-		if repairErr != nil {
-			return nil, nil, fmt.Errorf("分镜结构修复失败：%w", repairErr)
-		}
-		repairedText, _ := repaired["text"].(string)
-		plan, err = parseAgentStoryboardPlan(repairedText)
-		if err == nil {
-			err = validateStoryboardPlan(plan, input.ShotDuration, input.ShotCount, input.Characters)
-		}
+		plan, err = s.repairStoryboardPlan(ctx, task, input, config, text, err, input.ShotDuration, input.ShotCount)
 		if err != nil {
-			return nil, nil, fmt.Errorf("分镜模型结构修复后仍不合法：%w", err)
+			return nil, nil, err
 		}
+	}
+	if complexityErr := validateStoryboardComplexity(plan); complexityErr != nil {
+		_ = s.log(task.UserID, task.ID, "warn", "分镜复杂度建议", complexityErr.Error())
 	}
 	rows := make([]map[string]any, 0, len(plan.Shots))
 	for index, shot := range plan.Shots {
@@ -1255,6 +1271,36 @@ func (s *Service) processStoryboardRowsTask(ctx context.Context, task model.Task
 		})
 	}
 	return map[string]interface{}{"title": plan.Title, "rows": rows}, nil, nil
+}
+
+const maxStoryboardRepairAttempts = 2
+
+func (s *Service) repairStoryboardPlan(ctx context.Context, task model.Task, input agentStoryboardInput, config providerConfig, originalText string, validationErr error, shotDuration int, shotCount int) (agentStoryboardPlan, error) {
+	currentText := originalText
+	currentErr := validationErr
+	for attempt := 1; attempt <= maxStoryboardRepairAttempts; attempt++ {
+		_ = s.repo.UpdateTaskProgress(task.ID, "修复分镜结构", 55+attempt*10)
+		repairPrompt, promptErr := s.buildStoryboardRepairPrompt(task.UserID, task.Prompt, currentErr, input, currentText)
+		if promptErr != nil {
+			return agentStoryboardPlan{}, promptErr
+		}
+		repaired, repairErr := runTextTask(withProviderRequestKind(ctx, "repair"), canvasGenerationInput{Mode: "text", Prompt: repairPrompt, Config: config, StreamText: true})
+		if repairErr != nil {
+			return agentStoryboardPlan{}, fmt.Errorf("分镜结构修复失败：%w", repairErr)
+		}
+		repairedText, _ := repaired["text"].(string)
+		plan, parseErr := parseAgentStoryboardPlan(repairedText)
+		if parseErr == nil {
+			normalizeAutomaticStoryboardDurations(&plan, shotDuration)
+			parseErr = validateStoryboardPlan(plan, shotDuration, shotCount, input.Characters)
+		}
+		if parseErr == nil {
+			return plan, nil
+		}
+		currentText = repairedText
+		currentErr = parseErr
+	}
+	return agentStoryboardPlan{}, fmt.Errorf("分镜模型结构修复后仍不合法：%w", currentErr)
 }
 
 func providerConfigReady(config providerConfig) bool {
@@ -1389,7 +1435,7 @@ func validateStoryboardPlan(plan agentStoryboardPlan, shotDuration int, shotCoun
 	if err := validateStoryboardCharacterIDs(plan, characters); err != nil {
 		return err
 	}
-	return validateStoryboardComplexity(plan)
+	return nil
 }
 
 func validateStoryboardShotCount(plan agentStoryboardPlan, target int) error {
@@ -1430,6 +1476,18 @@ func validateStoryboardComplexity(plan agentStoryboardPlan) error {
 		return nil
 	}
 	return fmt.Errorf("镜头复杂度超限：%s", strings.Join(issues, "；"))
+}
+
+func normalizeAutomaticStoryboardDurations(plan *agentStoryboardPlan, target int) {
+	if plan == nil || target != 0 {
+		return
+	}
+	for index := range plan.Shots {
+		shot := &plan.Shots[index]
+		dialogueLength := utf8.RuneCountInString(strings.TrimSpace(shot.Dialogue))
+		requiredDuration := (dialogueLength + 4) / 5
+		shot.Duration = min(60, max(1, shot.Duration, requiredDuration))
+	}
 }
 
 func validateStoryboardCharacterIDs(plan agentStoryboardPlan, characters []storyboardCharacterCard) error {
@@ -1493,16 +1551,63 @@ func storyboardCameraMovementCount(value string) int {
 }
 
 func extractJSONText(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	trimmed = strings.TrimPrefix(trimmed, "```json")
-	trimmed = strings.TrimPrefix(trimmed, "```")
-	trimmed = strings.TrimSuffix(trimmed, "```")
-	start := strings.Index(trimmed, "{")
-	end := strings.LastIndex(trimmed, "}")
-	if start < 0 || end < start {
-		return "", errors.New("模型返回的不是 JSON")
+	// Text models may prepend an explanation or append a Markdown fence despite
+	// the JSON-only contract. Scan complete JSON values instead of pairing the
+	// first opening brace with the final closing brace, which can merge prose and
+	// make an otherwise valid character breakdown fail validation.
+	for start := 0; start < len(raw); start++ {
+		if raw[start] != '{' && raw[start] != '[' {
+			continue
+		}
+		end := jsonValueEnd(raw, start)
+		if end < start {
+			continue
+		}
+		candidate := raw[start : end+1]
+		var decoded interface{}
+		if json.Unmarshal([]byte(candidate), &decoded) == nil {
+			return candidate, nil
+		}
 	}
-	return trimmed[start : end+1], nil
+	return "", errors.New("模型返回的不是 JSON")
+}
+
+func jsonValueEnd(source string, start int) int {
+	stack := make([]byte, 0, 8)
+	inString := false
+	escaped := false
+	for index := start; index < len(source); index++ {
+		value := source[index]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if value == '\\' {
+				escaped = true
+			} else if value == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch value {
+		case '"':
+			inString = true
+		case '{', '[':
+			stack = append(stack, value)
+		case '}', ']':
+			if len(stack) == 0 {
+				return -1
+			}
+			opener := stack[len(stack)-1]
+			if (value == '}' && opener != '{') || (value == ']' && opener != '[') {
+				return -1
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return index
+			}
+		}
+	}
+	return -1
 }
 
 func (s *Service) buildAgentStoryboardResult(task model.Task, plan agentStoryboardPlan, assets []storyboardAsset, projectStyle storyboardProjectStyle) (map[string]interface{}, []map[string]interface{}, error) {

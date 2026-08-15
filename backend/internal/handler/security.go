@@ -23,17 +23,18 @@ import (
 )
 
 var (
-	runtimeService            *service.Service
-	geminiGeneratePath        = regexp.MustCompile(`^/models/([^/:]+):(generateContent|streamGenerateContent)$`)
-	customGeminiRelayPath     = regexp.MustCompile(`(?:^|/)models/[^/:]+:(generateContent|streamGenerateContent|predictLongRunning)$`)
-	customVideoTaskPath       = regexp.MustCompile(`(?:^|/)video/generations/[^/]+$`)
-	customXAIVideoTaskPath    = regexp.MustCompile(`(?:^|/)videos/[^/]+$`)
-	customVideoContentPath    = regexp.MustCompile(`(?:^|/)videos/[^/]+/content$`)
-	customArkVideoTaskPath    = regexp.MustCompile(`(?:^|/)contents/generations/tasks/[^/]+$`)
-	customMiniMaxH3TaskPath   = regexp.MustCompile(`(?:^|/)v2/query/video_generation/[^/]+$`)
-	customMiniMaxH3ListPath   = regexp.MustCompile(`(?:^|/)v2/query/video_generation$`)
-	customGeminiOperationPath = regexp.MustCompile(`(?:^|/)(?:models/[^/]+/)?operations/[^/]+$`)
-	openAIPostEndpoints       = map[string]bool{
+	runtimeService             *service.Service
+	geminiGeneratePath         = regexp.MustCompile(`^/models/([^/:]+):(generateContent|streamGenerateContent)$`)
+	customGeminiRelayPath      = regexp.MustCompile(`(?:^|/)models/[^/:]+:(generateContent|streamGenerateContent|predictLongRunning)$`)
+	customVideoTaskPath        = regexp.MustCompile(`(?:^|/)video/generations/[^/]+$`)
+	customXAIVideoTaskPath     = regexp.MustCompile(`(?:^|/)videos/[^/]+$`)
+	customVideoContentPath     = regexp.MustCompile(`(?:^|/)videos/[^/]+/content$`)
+	customArkVideoTaskPath     = regexp.MustCompile(`(?:^|/)contents/generations/tasks/[^/]+$`)
+	customMiniMaxH3TaskPath    = regexp.MustCompile(`(?:^|/)v2/query/video_generation/[^/]+$`)
+	customMiniMaxH3ListPath    = regexp.MustCompile(`(?:^|/)v2/query/video_generation$`)
+	customGeminiOperationPath  = regexp.MustCompile(`(?:^|/)(?:models/[^/]+/)?operations/[^/]+$`)
+	customNovitaTaskResultPath = regexp.MustCompile(`(?:^|/)async/task-result$`)
+	openAIPostEndpoints        = map[string]bool{
 		"/responses": true, "/chat/completions": true, "/images/generations": true, "/images/edits": true,
 		"/audio/speech": true,
 	}
@@ -78,6 +79,12 @@ func authorizeCustomRelayProtocol(method string, target *url.URL, apiFormat stri
 		return errors.New("自定义渠道协议标识无效")
 	}
 	if method == http.MethodGet {
+		if customNovitaTaskResultPath.MatchString(requestPath) {
+			if len(query) == 1 && len(query["task_id"]) == 1 && strings.TrimSpace(query.Get("task_id")) != "" {
+				return nil
+			}
+			return errors.New("自定义渠道不允许访问该上游接口")
+		}
 		allowed := requestPath == "/models" || strings.HasSuffix(requestPath, "/models")
 		allowQuery := false
 		if apiFormat == "openai" {
@@ -100,7 +107,7 @@ func authorizeCustomRelayProtocol(method string, target *url.URL, apiFormat stri
 	}
 	if apiFormat == "openai" {
 		multipartAllowed := mediaType == "multipart/form-data" && (strings.HasSuffix(requestPath, "/images/edits") || strings.HasSuffix(requestPath, "/videos"))
-		jsonAllowed := mediaType == "application/json" && (strings.HasSuffix(requestPath, "/responses") || strings.HasSuffix(requestPath, "/chat/completions") || strings.HasSuffix(requestPath, "/images/generations") || strings.HasSuffix(requestPath, "/images/edits") || strings.HasSuffix(requestPath, "/audio/speech") || strings.HasSuffix(requestPath, "/video/generations") || strings.HasSuffix(requestPath, "/videos/generations") || strings.HasSuffix(requestPath, "/videos") || strings.HasSuffix(requestPath, "/contents/generations/tasks") || strings.HasSuffix(requestPath, "/v2/video_generation"))
+		jsonAllowed := mediaType == "application/json" && (strings.HasSuffix(requestPath, "/responses") || strings.HasSuffix(requestPath, "/chat/completions") || strings.HasSuffix(requestPath, "/images/generations") || strings.HasSuffix(requestPath, "/images/edits") || strings.HasSuffix(requestPath, "/audio/speech") || strings.HasSuffix(requestPath, "/video/generations") || strings.HasSuffix(requestPath, "/videos/generations") || strings.HasSuffix(requestPath, "/videos") || strings.HasSuffix(requestPath, "/contents/generations/tasks") || strings.HasSuffix(requestPath, "/v2/video_generation") || strings.HasSuffix(requestPath, "/video/create"))
 		if len(query) != 0 || (!multipartAllowed && !jsonAllowed) {
 			return errors.New("自定义渠道不允许访问该上游接口")
 		}
@@ -207,7 +214,7 @@ func interfaceAllowsProxyPath(interfaceType model.ChannelInterfaceType, requestP
 		return requestPath == "/images/generations"
 	case model.ChannelInterfaceOpenAIAudio:
 		return requestPath == "/audio/speech"
-	case model.ChannelInterfaceAsyncAudio, model.ChannelInterfaceNewAPIVideo, model.ChannelInterfaceNewAPIChannel1, model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceAsyncVideoGenerations, model.ChannelInterfaceMiniMaxH3, model.ChannelInterfaceComfyUIH3, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineArkVideo, model.ChannelInterfaceVolcengineJiMengImage, model.ChannelInterfaceVolcengineJiMengVideo, model.ChannelInterfaceGeminiVeo:
+	case model.ChannelInterfaceAsyncAudio, model.ChannelInterfaceNewAPIVideo, model.ChannelInterfaceNewAPIChannel1, model.ChannelInterfaceNewAPIChannel2, model.ChannelInterfaceAsyncVideoGenerations, model.ChannelInterfaceMiniMaxH3, model.ChannelInterfaceComfyUIH3, model.ChannelInterfaceXAIVideo, model.ChannelInterfaceVolcengineArkVideo, model.ChannelInterfaceVolcengineJiMengImage, model.ChannelInterfaceVolcengineJiMengVideo, model.ChannelInterfaceGeminiVeo, model.ChannelInterfaceNovitaVideo:
 		return false
 	default:
 		return true
